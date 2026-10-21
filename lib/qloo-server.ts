@@ -12,7 +12,7 @@ export class QlooError extends Error {
   constructor(message: string, public status = 502) { super(message); }
 }
 
-export async function readBody(request: Request): Promise<Record<string, unknown>> {
+export async function readBody(request: Request, limit = 12_000): Promise<Record<string, unknown>> {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
     throw new QlooError("Please send an application/json request.", 415);
   }
@@ -25,7 +25,7 @@ export async function readBody(request: Request): Promise<Record<string, unknown
     const chunk = await reader.read();
     if (chunk.done) break;
     bytes += chunk.value.byteLength;
-    if (bytes > 12_000) { await reader.cancel(); throw new QlooError("Request is too large.", 413); }
+    if (bytes > limit) { await reader.cancel(); throw new QlooError("Request is too large.", 413); }
     chunks.push(chunk.value);
   }
   try {
@@ -98,13 +98,13 @@ export async function resolveFavorite(favorite: KnownFavorite): Promise<Seed> {
   return seed;
 }
 
-export async function expandCategory(type: FavoriteType, seeds: Seed[], from: number, to: number): Promise<CategoryResult> {
-  const result: CategoryResult = { type, items: [], filters: { from, to, popularity: type === "movie" ? 0.8 : type === "tv_show" ? 0.5 : null }, attempts: 0, warnings: [], error: null };
-  const deadline = Date.now() + 52_000;
+export async function expandCategory(type: FavoriteType, seeds: Seed[], from: number, to: number, relax = false, deadlineAt?: number): Promise<CategoryResult> {
+  const result: CategoryResult = { type, items: [], filters: { from, to, popularity: type === "movie" ? (relax ? 0.5 : 0.8) : type === "tv_show" ? (relax ? 0.2 : 0.5) : null }, attempts: 0, warnings: [], error: null };
+  const deadline = Math.min(Date.now() + 52_000, deadlineAt ?? Infinity);
   let artistEntities: unknown[] | null = null;
   let queryWarning = false;
   // No tags are imposed. Lower popularity, then widen the era only if needed.
-  const attempts = type === "artist" ? ["initial", "widen"] : ["initial", "popularity", "widen"];
+  const attempts = relax ? ["initial"] : type === "artist" ? ["initial", "widen"] : ["initial", "popularity", "widen"];
   for (const attempt of attempts) {
     const previousFilters = { ...result.filters };
     if (attempt === "popularity") result.filters.popularity = type === "movie" ? 0.5 : 0.2;

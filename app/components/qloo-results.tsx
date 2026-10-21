@@ -25,7 +25,7 @@ export default function QlooResults({ result }: { result: Expansion }) {
       <h2 id="qloo-heading" className="mt-2 text-2xl font-semibold">Connections from their favorites</h2>
       <p className="mt-3 text-stone-600">Reminiscence years: {result.era.from}–{result.era.to} (ages 10–30).</p>
       <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 leading-relaxed text-amber-950">
-        Not safety reviewed. Topics to avoid have not been applied yet. These are raw Qloo results for review, not a session plan. Safety review comes in the next step.
+        Unfiltered source data. Topics to avoid are not applied to this raw list. Use the separate screening decisions and session plan above after they are ready.
       </p>
       <p className="mt-4 text-sm leading-relaxed text-stone-600">Contribution scores describe connections to the starting favorites, not the probability of liking an item. Missing scores are not estimated.</p>
       <div className="mt-6 space-y-8">

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { FavoriteType, Profile } from "@/lib/profile";
 import type { Expansion, Seed } from "@/lib/qloo-types";
 import QlooResults, { RecognizedFavorites } from "./qloo-results";
+import type { PlanResponse, ReviewResponse } from "@/lib/plan-schema";
+import PlanningResults from "./planning-results";
 
 type FavoriteRow = { id: number; type: FavoriteType; name: string };
 
@@ -34,6 +36,8 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   const [busy, setBusy] = useState(false);
   const [seeds, setSeeds] = useState<Seed[]>([]);
   const [result, setResult] = useState<Expansion | null>(null);
+  const [review, setReview] = useState<ReviewResponse | null>(null);
+  const [planned, setPlanned] = useState<PlanResponse | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
   useEffect(() => () => activeRequest.current?.abort(), []);
   const nextFavoriteId = useRef(3);
@@ -43,6 +47,8 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     setProgress("");
     setSeeds([]);
     setResult(null);
+    setReview(null);
+    setPlanned(null);
   }
 
   function fillExample() {
@@ -132,10 +138,13 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       setProgress("Expanding to movies, TV shows and music… This may take a little while.");
       const expanded = await post<Expansion>("/api/expand", { birthYear: profile.birthYear, seeds: resolved.seeds });
       setResult(expanded);
-      const count = expanded.categories.reduce((sum, category) => sum + category.items.length, 0);
-      setProgress(expanded.categories.some((category) => category.error)
-        ? `Loaded ${count} connections. Some categories could not be loaded; see details below.`
-        : `Loaded ${count} connections. Results are ready for review below.`);
+      setProgress("Checking topics to avoid and finding gentle ways to use familiar favorites…");
+      const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile, proof: expanded.proof });
+      setReview(screened);
+      setProgress(`Set aside ${screened.review.counts.exclude} items that touch on topics to avoid. Planning a gentle session…`);
+      const session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
+      setPlanned(session);
+      setProgress(`Your session plan is ready below. Set aside ${screened.review.counts.exclude} items; kept ${screened.review.counts.caution} with specific safe angles.`);
     } catch (error) {
       if (!controller.signal.aborted) {
         setError(error instanceof Error ? error.message : "Unable to load results. Please try again.");
@@ -166,6 +175,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       <p className="mt-4 text-base leading-relaxed text-stone-600">
         Tell us a little about the person you care for. A nickname is welcome.
       </p>
+      <p className="mt-2 text-sm leading-relaxed text-stone-500">Your favorites are checked with Qloo. Your profile and candidate items are sent to Gemini for screening and planning when you submit.</p>
 
       <form
         aria-busy={busy}
@@ -365,12 +375,13 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
             disabled={busy}
             className="min-h-14 w-full rounded-xl bg-teal-800 px-6 py-4 text-lg font-semibold text-white transition-colors hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700"
           >
-            {busy ? "Finding connections…" : "Find familiar connections"}
+            {busy ? "Building your session…" : "Build a gentle session"}
           </button>
         </div>
       </form>
       {seeds.length > 0 ? <RecognizedFavorites seeds={seeds} /> : null}
-      {result ? <QlooResults result={result} /> : null}
+      <PlanningResults review={review} planned={planned} />
+      {result ? <details className="mt-6"><summary className="min-h-11 cursor-pointer font-semibold text-teal-900">Original Qloo data</summary><QlooResults result={result} /></details> : null}
     </section>
   );
 }

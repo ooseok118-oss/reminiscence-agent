@@ -32,6 +32,7 @@ export type CategoryResult = {
 };
 
 export type Expansion = {
+  proof?: string;
   seeds: Seed[];
   era: { from: number; to: number };
   categories: CategoryResult[];
