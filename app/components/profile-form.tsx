@@ -1,7 +1,9 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { FavoriteType, Profile } from "@/lib/profile";
+import type { Expansion, Seed } from "@/lib/qloo-types";
+import QlooResults, { RecognizedFavorites } from "./qloo-results";
 
 type FavoriteRow = { id: number; type: FavoriteType; name: string };
 
@@ -28,12 +30,19 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
   const [otherTopicsToAvoid, setOtherTopicsToAvoid] = useState("");
   const [error, setError] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [seeds, setSeeds] = useState<Seed[]>([]);
+  const [result, setResult] = useState<Expansion | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => activeRequest.current?.abort(), []);
   const nextFavoriteId = useRef(3);
 
   function clearFeedback() {
     setError("");
-    setSubmitted(false);
+    setProgress("");
+    setSeeds([]);
+    setResult(null);
   }
 
   function fillExample() {
@@ -66,8 +75,9 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     clearFeedback();
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (activeRequest.current) return;
     clearFeedback();
     const form = event.currentTarget;
     const knownFavorites = favorites
@@ -102,8 +112,39 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       otherTopicsToAvoid: otherTopicsToAvoid.trim(),
     };
 
-    console.info("Reminiscence Agent profile", profile);
-    setSubmitted(true);
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    setBusy(true);
+    async function post<T>(path: string, body: unknown): Promise<T> {
+      const response = await fetch(path, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body), signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) throw new Error(data?.error ?? "The server could not complete this request. Please try again.");
+      return data as T;
+    }
+    try {
+      setProgress("Finding your favorites in Qloo’s taste graph…");
+      // Only favorite names/types and birth year are needed for Qloo.
+      const resolved = await post<{ seeds: Seed[] }>("/api/resolve", { knownFavorites: profile.knownFavorites });
+      setSeeds(resolved.seeds);
+      setProgress("Expanding to movies, TV shows and music… This may take a little while.");
+      const expanded = await post<Expansion>("/api/expand", { birthYear: profile.birthYear, seeds: resolved.seeds });
+      setResult(expanded);
+      const count = expanded.categories.reduce((sum, category) => sum + category.items.length, 0);
+      setProgress(expanded.categories.some((category) => category.error)
+        ? `Loaded ${count} connections. Some categories could not be loaded; see details below.`
+        : `Loaded ${count} connections. Results are ready for review below.`);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setError(error instanceof Error ? error.message : "Unable to load results. Please try again.");
+        setProgress("");
+      }
+    } finally {
+      activeRequest.current = null;
+      if (!controller.signal.aborted) setBusy(false);
+    }
   }
 
   return (
@@ -118,7 +159,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
             A few familiar favorites
           </h2>
         </div>
-        <button type="button" onClick={fillExample} className={secondaryButtonClass}>
+        <button type="button" disabled={busy} onClick={fillExample} className={secondaryButtonClass}>
           Try an example
         </button>
       </div>
@@ -127,13 +168,14 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       </p>
 
       <form
+        aria-busy={busy}
         className="mt-8 space-y-8"
         onSubmit={handleSubmit}
         onChange={clearFeedback}
         onInvalid={clearFeedback}
         method="post"
       >
-        <fieldset className="min-w-0 space-y-5">
+        <fieldset disabled={busy} className="min-w-0 space-y-5">
           <legend className="mb-4 text-lg font-semibold text-stone-900">About them</legend>
           <div className="grid gap-5 sm:grid-cols-[1fr_0.65fr]">
             <div>
@@ -195,7 +237,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           </div>
         </fieldset>
 
-        <fieldset className="min-w-0 border-t border-stone-200 pt-6">
+        <fieldset disabled={busy} className="min-w-0 border-t border-stone-200 pt-6">
           <legend className="pr-3 text-lg font-semibold text-stone-900">Known favorites</legend>
           <p id="favorites-hint" className="mb-5 text-base leading-relaxed text-stone-600">
             Add 1–3 favorites. Two or three from different categories work well,
@@ -268,7 +310,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           ) : null}
         </fieldset>
 
-        <fieldset className="min-w-0 border-t border-stone-200 pt-6">
+        <fieldset disabled={busy} className="min-w-0 border-t border-stone-200 pt-6">
           <legend className="pr-3 text-lg font-semibold text-stone-900">
             Topics to avoid <span className="text-sm font-normal text-stone-500">(optional)</span>
           </legend>
@@ -315,19 +357,20 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
 
         <div className="border-t border-stone-200 pt-6">
           {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-4 text-rose-900">{error}</p> : null}
-          {submitted ? (
-            <p role="status" className="mb-4 rounded-xl bg-teal-50 p-4 leading-relaxed text-teal-950">
-              Your profile is ready. Session planning is coming soon.
-            </p>
-          ) : null}
+          <p role="status" aria-live="polite" className={progress ? "mb-4 rounded-xl bg-teal-50 p-4 leading-relaxed text-teal-950" : "sr-only"}>
+            {progress}
+          </p>
           <button
             type="submit"
+            disabled={busy}
             className="min-h-14 w-full rounded-xl bg-teal-800 px-6 py-4 text-lg font-semibold text-white transition-colors hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700"
           >
-            Review profile
+            {busy ? "Finding connections…" : "Find familiar connections"}
           </button>
         </div>
       </form>
+      {seeds.length > 0 ? <RecognizedFavorites seeds={seeds} /> : null}
+      {result ? <QlooResults result={result} /> : null}
     </section>
   );
 }
