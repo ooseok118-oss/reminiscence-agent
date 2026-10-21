@@ -210,7 +210,7 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
     try { return build(); } catch (error) { if (!fallback) throw error; return backup(); }
   };
 
-  const opening = attempt(() => {
+  let opening = attempt(() => {
     const item = resolve(plan.opening_song);
     if (item.type !== "artist") throw new Error("Opening needs a Qloo artist.");
     return { ...describe(item), id: item.entity_id, songs: extras(plan.opening_song.songs, 2), caregiver_tip: instruction(plan.opening_song.caregiver_tip, OPENING_TIP) };
@@ -229,7 +229,6 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
       try {
         const item = resolve(entry);
         if (item.type !== kind || conversation.some((chosen) => chosen.id === item.entity_id)) continue;
-        if (fallback && requirements.all_distinct && used.has(item.entity_id)) continue;
         let prompts = entry.prompts.filter((line) => !questionProblem(line, topics));
         if (prompts.length < 3 && fallback && item.verdict === "ok") {
           prompts = [...prompts, ...questionsFor(item).filter((line) => !prompts.includes(line))];
@@ -266,16 +265,31 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
   });
   used.add(sensory.id);
 
-  const closing = attempt(() => {
+  let closing = attempt(() => {
     const item = resolve(plan.closing);
     if (item.type !== "artist") throw new Error("Closing needs a Qloo artist.");
-    if (requirements.distinct_music && item.entity_id === opening.id) throw new Error("Use different artists for the opening and closing.");
-    if (fallback && requirements.all_distinct && used.has(item.entity_id)) throw new Error("Already used.");
     return { ...describe(item), id: item.entity_id, songs: extras(plan.closing.songs, 2), caregiver_tip: instruction(plan.closing.caregiver_tip, CLOSING_TIP) };
   }, () => {
     const item = spare(["artist"], used);
     return { ...describe(item), id: item.entity_id, songs: [], caregiver_tip: CLOSING_TIP };
   });
+
+  // The model often reuses the conversation's artist, or the opening artist, for a song slot.
+  // The conversation questions are the valuable part, so the duplicated song slot gets another
+  // approved artist instead of the whole plan being discarded. Song titles written for the old
+  // artist are dropped, and a tip that names that artist is replaced.
+  const swapArtist = (slot: typeof opening, avoid: Set<string>, tip: string): typeof opening => {
+    const item = spare(["artist"], avoid);
+    if (avoid.has(item.entity_id)) return slot;
+    const keepTip = !loose(slot.caregiver_tip).includes(loose(slot.item));
+    return { ...describe(item), id: item.entity_id, songs: [], caregiver_tip: keepTip ? slot.caregiver_tip : tip };
+  };
+  const talk = new Set(conversation.map((topic) => topic.id));
+  if (requirements.all_distinct && talk.has(opening.id)) opening = swapArtist(opening, new Set([...talk, closing.id]), OPENING_TIP);
+  if ((requirements.all_distinct && talk.has(closing.id)) || (requirements.distinct_music && closing.id === opening.id)) {
+    closing = swapArtist(closing, new Set([...talk, opening.id]), CLOSING_TIP);
+  }
+  if (!fallback && requirements.distinct_music && opening.id === closing.id) throw new Error("Use different artists for the opening and closing.");
 
   // The sensory activity may revisit a conversation film or show; everything else stays distinct.
   const ids = [opening.id, ...conversation.map((topic) => topic.id), closing.id];

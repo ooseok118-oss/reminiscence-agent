@@ -101,14 +101,28 @@ test("the session shape is enforced when the pool can supply it", () => {
   assert.throws(() => validatePlan(bad, items, []), /one item of each type/);
   bad = plan(); bad.conversation[1] = entry(fairLady, { prompts: questions("the hats in My Fair Lady") });
   assert.throws(() => validatePlan(bad, items, []), /one item of each type/);
-  bad = plan(); bad.closing = entry(sinatra, { songs: [], caregiver_tip: "Offer quiet listening." });
-  assert.throws(() => validatePlan(bad, items, []), /different artists/);
   const revisit = plan(); revisit.sensory_activity = entry(happyDays, { activity: "Look at photos of the Happy Days diner set together.", materials: ["Printed photos"] });
   assert.equal(validatePlan(generatedPlanSchema.parse(revisit), items, []).sensory_activity.item, "Happy Days");  // revisiting a topic is fine
-  bad = plan(); bad.closing = entry(armstrong, { songs: [], caregiver_tip: "Offer quiet listening." });
-  assert.throws(() => validatePlan(bad, items, []), /same item twice/);
   bad = plan(); bad.closing = entry(fairLady, { songs: [], caregiver_tip: "Offer quiet listening." });
   assert.throws(() => validatePlan(bad, items, []), /Closing needs a Qloo artist/);
+});
+
+test("a duplicated song slot gets another approved artist instead of failing the plan", () => {
+  // Closing repeats the opening artist: the closing gets the unused artist, songs dropped, tip kept.
+  let generated = plan(); generated.closing = entry(sinatra, { songs: ["My Way"], caregiver_tip: "Offer quiet listening." });
+  let result = validatePlan(generatedPlanSchema.parse(generated), items, []);
+  assert.equal(result.closing.item, "Nat King Cole");
+  assert.deepEqual(result.closing.songs, []);
+  assert.equal(result.closing.caregiver_tip, "Offer quiet listening.");
+  // Opening repeats the conversation artist and names him in the tip: both are replaced.
+  generated = plan(); generated.opening_song = entry(armstrong, { songs: ["What a Wonderful World"], caregiver_tip: "Play Louis Armstrong softly." });
+  result = validatePlan(generatedPlanSchema.parse(generated), items, []);
+  assert.equal(result.opening_song.item, "Frank Sinatra");
+  assert.deepEqual(result.opening_song.songs, []);
+  assert.doesNotMatch(result.opening_song.caregiver_tip, /Armstrong/);
+  assert.ok(result.conversation.some((topic) => topic.item === "Louis Armstrong"));      // the questions survive
+  const names = [result.opening_song.item, ...result.conversation.map((topic) => topic.item), result.closing.item];
+  assert.equal(new Set(names).size, names.length);
 });
 
 test("a sparse pool relaxes only what it cannot supply", () => {
