@@ -4,7 +4,11 @@ A conversation aid for caregivers and families, inspired by familiar favorites.
 
 ## Status
 
-Step 1: a deployable Next.js starter with an English placeholder page.
+Step 1 complete: a deployed Next.js starter with an English placeholder page.
+
+Live demo: https://reminiscence-agent.vercel.app
+
+Production is connected to the main branch of this GitHub repository.
 Profile entry and Qloo/Gemini integration will be added in later steps.
 
 ## Stack
