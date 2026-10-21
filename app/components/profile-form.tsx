@@ -150,7 +150,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile, proof: expanded.proof });
       setReview(screened);
       setStage("plan");
-      setProgress(`Set aside ${screened.review.counts.exclude} items that touch on topics to avoid. Writing a 30-minute session…`);
+      setProgress(`Checked topics to avoid. Writing a 30-minute session…`);
       let session: PlanResponse;
       try {
         session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });

@@ -14,7 +14,7 @@ export function joinNames(names: string[]) {
 function setAsideSummary(review: ReviewResponse) {
   const { exclude, caution } = review.review.counts;
   const first = exclude
-    ? `Set aside ${exclude} ${exclude === 1 ? "item" : "items"} that touch on topics to avoid`
+    ? `Set aside ${exclude} ${exclude === 1 ? "item that touches" : "items that touch"} on topics to avoid`
     : "Nothing needed to be set aside";
   return caution ? `${first}. ${caution} kept with gentle limits on what to talk about.` : `${first}.`;
 }

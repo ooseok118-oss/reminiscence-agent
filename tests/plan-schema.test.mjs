@@ -67,13 +67,33 @@ test("model-written attribution is ignored in favor of Qloo scores", () => {
   assert.equal(result.opening_song.why_this, sinatra.why_this);
 });
 
-test("excluded items, invented titles and unapproved caution angles cannot enter the plan", () => {
+test("excluded items, invented items and unapproved caution angles cannot enter the plan", () => {
   let bad = plan(); bad.sensory_activity.entity_id = cabaret.entity_id; bad.sensory_activity.item = cabaret.name;
   assert.throws(() => validatePlan(bad, items, []), /approved Qloo pool/);
-  bad = plan(); bad.opening_song.item = "A song invented by the model";
+  bad = plan(); bad.opening_song.entity_id = id(99); bad.opening_song.item = "A singer invented by the model";
   assert.throws(() => validatePlan(bad, items, []), /approved Qloo pool/);
   bad = plan(); bad.conversation[0].safe_angle = "The violent plot";
   assert.throws(() => validatePlan(bad, items, []), /approved safe angle/);
+});
+
+test("harmless formatting slips are repaired instead of discarding a safe plan", () => {
+  const slips = plan();
+  slips.opening_song.item = "frank sinatra";                       // case differs; the ID is authoritative
+  slips.conversation[0].entity_id = "";                             // missing ID, name with curly quotes resolves
+  slips.conversation[0].item = "West Side Story\u2019";
+  slips.conversation[0].safe_angle = "the dancing.";                // punctuation and case differ
+  slips.opening_song.songs = ["Fly Me to the Moon", "My Kind of Town", "A third song"];
+  slips.sensory_activity.materials = ["Photos", "A hat", "A scarf", "A fan", "Gloves"];
+  slips.conversation.push(entry(waltons, { prompts: questions("The Waltons") }));  // an extra topic is skipped
+  slips.conversation[1].prompts.push("Can you tell me more?");      // an extra unsuitable question is dropped
+  const result = validatePlan(generatedPlanSchema.parse(slips), items, []);
+  assert.equal(result.opening_song.item, "Frank Sinatra");
+  assert.equal(result.conversation[0].item, "West Side Story");
+  assert.equal(result.conversation.length, 3);
+  assert.deepEqual(result.conversation.map((topic) => topic.item).sort(), ["Happy Days", "Louis Armstrong", "West Side Story"]);
+  assert.equal(result.conversation.find((topic) => topic.item === "Happy Days").prompts.length, 3);
+  assert.equal(result.opening_song.songs.length, 2);
+  assert.equal(result.sensory_activity.materials.length, 4);
 });
 
 test("the session shape is enforced when the pool can supply it", () => {
@@ -104,7 +124,7 @@ test("a sparse pool relaxes only what it cannot supply", () => {
   assert.equal(validatePlan(generatedPlanSchema.parse(small), sparse, []).conversation.length, 1);
 });
 
-test("read-aloud text rejects quizzes, long prompts and avoided topics, including song titles", () => {
+test("read-aloud text rejects quizzes, long prompts and avoided topics", () => {
   let bad = plan(); bad.conversation[1].prompts[1] = "What year do you remember this coming out?";
   assert.throws(() => validatePlan(bad, items, []), /quiz/);
   bad = plan(); bad.conversation[1].prompts[1] = "What " + Array(24).fill("word").join(" ");
@@ -113,12 +133,20 @@ test("read-aloud text rejects quizzes, long prompts and avoided topics, includin
   assert.throws(() => validatePlan(bad, items, ["War"]), /topic to avoid/);
   bad = plan(); bad.closing.caregiver_tip = "Talk about hospitals.";
   assert.throws(() => validatePlan(bad, items, ["Hospitals"]), /topic to avoid/);
-  bad = plan(); bad.opening_song.songs = ["Hospital Blues"];
-  assert.throws(() => validatePlan(bad, items, ["Hospital Blues"]), /topic to avoid/);
+  bad = plan(); bad.sensory_activity.activity = "Do you remember the dance steps?";
+  assert.throws(() => validatePlan(bad, items, []), /quiz/);
   bad = plan(); bad.conversation[1].prompts[1] = "Would you like to talk about this?";
   assert.throws(() => validatePlan(bad, items, []), /What, How, Who or Where/);
   bad = plan(); bad.conversation[1].prompts[1] = "Who starred in this show?";
   assert.throws(() => validatePlan(bad, items, []), /quiz/);
+});
+
+test("a song or material touching an avoided topic is dropped, never shown", () => {
+  const generated = plan(); generated.opening_song.songs = ["Hospital Blues", "Fly Me to the Moon"];
+  generated.sensory_activity.materials = ["Hospital bracelet", "A hat"];
+  const result = validatePlan(generatedPlanSchema.parse(generated), items, ["Hospital"]);
+  assert.deepEqual(result.opening_song.songs, ["Fly Me to the Moon"]);
+  assert.deepEqual(result.sensory_activity.materials, ["A hat"]);
 });
 
 test("a question naming the item moves to the front; plans without one are kept, not discarded", () => {
@@ -126,17 +154,46 @@ test("a question naming the item moves to the front; plans without one are kept,
   assert.equal(validatePlan(generatedPlanSchema.parse(moved), items, []).conversation[1].prompts[0], "What did you enjoy about Happy Days on a Tuesday night?");
   const unnamed = plan(); unnamed.conversation[1].prompts[0] = "What trips near the water did you enjoy?";
   assert.equal(validatePlan(generatedPlanSchema.parse(unnamed), items, []).conversation[1].prompts[0], "What trips near the water did you enjoy?");
-  assert.deepEqual(leadWithItem("The Love Boat", ["Who came along?", "What did you like about Love Boat’s cruises?"]), ["What did you like about Love Boat’s cruises?", "Who came along?"]);
+  assert.deepEqual(leadWithItem("The Love Boat", ["Who came along?", "What did you like about Love Boat\u2019s cruises?"]), ["What did you like about Love Boat\u2019s cruises?", "Who came along?"]);
 });
 
-test("malformed output and unbounded profiles fail schema validation", () => {
+test("warm Who questions stay allowed; asking to name titles is dropped", () => {
+  const generated = plan();
+  generated.conversation[2].prompts = ["What do you enjoy about Louis Armstrong’s trumpet?", "What songs did you sing along with?", "Who sang along with you at parties?", "Where did you hear him play?"];
+  const prompts = validatePlan(generatedPlanSchema.parse(generated), items, []).conversation.find((topic) => topic.item === "Louis Armstrong").prompts;
+  assert.deepEqual(prompts, ["What do you enjoy about Louis Armstrong’s trumpet?", "Who sang along with you at parties?", "Where did you hear him play?"]);
+});
+
+test("on the last attempt, unusable slots are filled from the approved pool with plain wording", () => {
+  const broken = plan();
+  broken.opening_song.entity_id = id(99); broken.opening_song.item = "Invented singer";
+  broken.conversation.splice(1, 1);                                        // TV topic missing
+  broken.sensory_activity.entity_id = cabaret.entity_id;                  // excluded item
+  broken.closing.caregiver_tip = "Do you remember this song?";             // quiz in a tip
+  assert.throws(() => validatePlan(generatedPlanSchema.parse(broken), items, []));
+  const result = validatePlan(generatedPlanSchema.parse(broken), items, [], { fallback: true });
+  const names = [result.opening_song.item, ...result.conversation.map((topic) => topic.item), result.sensory_activity.item, result.closing.item];
+  assert.equal(new Set(names).size, names.length);                        // still six different items
+  assert.equal(result.opening_song.type, "artist");
+  assert.deepEqual(result.conversation.map((topic) => topic.type).sort(), ["artist", "movie", "tv_show"]);
+  assert.ok(!names.includes("Cabaret"));
+  assert.notEqual(result.sensory_activity.item, "West Side Story");        // caution items never get plain wording
+  assert.match(result.closing.caregiver_tip, /calm/);
+  const tv = result.conversation.find((topic) => topic.type === "tv_show");
+  assert.equal(tv.prompts.length, 3);
+  assert.match(tv.prompts[0], new RegExp(tv.item));
+});
+
+test("the fallback still refuses when no approved item can fill a slot", () => {
+  const onlyFilms = [fairLady, cabaret];
+  const generated = { opening_song: entry(fairLady, { songs: [], caregiver_tip: "Offer quiet listening." }), conversation: [entry(fairLady, { prompts: questions("My Fair Lady") })], sensory_activity: entry(fairLady, { activity: "Look at photos of hats.", materials: [] }), closing: entry(fairLady, { songs: [], caregiver_tip: "Offer quiet listening." }) };
+  assert.throws(() => validatePlan(generatedPlanSchema.parse(generated), onlyFilms, [], { fallback: true }), /Not enough approved Qloo items/);
+});
+
+test("too few usable questions, malformed output and unbounded profiles still fail", () => {
   assert.equal(generatedPlanSchema.safeParse({ conversation: [] }).success, false);
-  let bad = plan(); bad.conversation[0].prompts.pop();
-  assert.equal(generatedPlanSchema.safeParse(bad).success, false);
-  bad = plan(); bad.opening_song.songs = ["One", "Two", "Three"];
-  assert.equal(generatedPlanSchema.safeParse(bad).success, false);
-  bad = plan(); bad.conversation.push(bad.conversation[0]);
-  assert.equal(generatedPlanSchema.safeParse(bad).success, false);
+  const short = plan(); short.conversation[1].prompts.pop();
+  assert.throws(() => validatePlan(generatedPlanSchema.parse(short), items, []), /three questions/);
   assert.equal(profileSchema.safeParse({ firstName: "Mary", birthYear: 9999, hometown: "Columbus", knownFavorites: [], topicsToAvoid: [], otherTopicsToAvoid: "" }).success, false);
 });
 

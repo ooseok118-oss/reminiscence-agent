@@ -43,7 +43,8 @@ function list(names: string[]) {
 export function explanation(contributions: Contribution[]): string | null {
   if (!contributions.length) return null;
   const [first, second, ...rest] = contributions;
-  if (!second) return `Inspired by ${first.name}`;
+  // One favorite: say what the taste graph found, not just the source.
+  if (!second) return `People who love ${first.name} often love this too`;
   // One favorite "leads" when it clearly outweighs the next (0.58 vs 0.42 with two favorites).
   return first.score - second.score >= 0.16
     ? `Mostly inspired by ${first.name}, with a touch of ${list([second, ...rest].map((item) => item.name))}`

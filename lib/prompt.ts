@@ -12,7 +12,8 @@ INPUT
 SESSION SHAPE (30 minutes)
 - opening_song (5 min): one music artist.
 - conversation (15 min): exactly one item for each type in requirements.conversation_types
-  (usually one film, one TV show and one music artist). Three questions per item.
+  (usually one film, one TV show and one music artist). Four questions per item; the
+  caregiver sees the best three.
 - sensory_activity (5 min): one item whose type is in requirements.sensory_types.
 - closing (5 min): one music artist with a calm, gentle feel. When requirements.distinct_music
   is true, it must be a different artist from the opening.
@@ -48,7 +49,7 @@ RULES
 OUTPUT (JSON only, no other text)
 {
   "opening_song":     { "entity_id": "", "item": "", "safe_angle": "", "songs": [""], "caregiver_tip": "" },
-  "conversation":     [ { "entity_id": "", "item": "", "safe_angle": "", "prompts": ["", "", ""] } ],
+  "conversation":     [ { "entity_id": "", "item": "", "safe_angle": "", "prompts": ["", "", "", ""] } ],
   "sensory_activity": { "entity_id": "", "item": "", "safe_angle": "", "activity": "", "materials": [""] },
   "closing":          { "entity_id": "", "item": "", "safe_angle": "", "songs": [""], "caregiver_tip": "" }
 }`;

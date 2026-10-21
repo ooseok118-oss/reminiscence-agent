@@ -4,7 +4,7 @@ import { generateText, jsonSchema, Output } from "ai";
 import { z } from "zod";
 import { SAFETY_PROMPT, SAFETY_CONTRACT } from "./safetyPrompt";
 import { SESSION_PROMPT, SESSION_CONTRACT } from "./prompt";
-import { generatedPlanSchema, planRequirements, validatePlan, validateVerdicts, verdictSchema, type ReviewedItem } from "./plan-schema";
+import { generatedPlanSchema, planRequirements, validatePlan, validateVerdicts, verdictSchema, type ReviewedItem, type SessionPlan } from "./plan-schema";
 import type { Profile } from "./profile";
 import type { QlooItem } from "./qloo-types";
 import { simplifyModelSchema } from "./model-schema";
@@ -18,7 +18,7 @@ export class PlanningError extends Error {
   constructor(message: string, public status = 502) { super(message); }
 }
 
-async function structured<T>(stage: string, model: string, system: string, input: unknown, schema: z.ZodType<T>, validate: (data: T) => T, deadline: number): Promise<T> {
+async function structured<T>(stage: string, model: string, system: string, input: unknown, schema: z.ZodType<T>, validate: (data: T, lastAttempt: boolean) => T, deadline: number): Promise<T> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new PlanningError("Gemini is not configured on the server. Please contact the site owner.", 503);
   const google = createGoogle({ apiKey: key });
@@ -44,7 +44,7 @@ async function structured<T>(stage: string, model: string, system: string, input
         maxRetries: 0, abortSignal: AbortSignal.timeout(Math.min(25_000, remaining)),
       });
       generated = true;
-      return validate(output);
+      return validate(output, attempt === attempts - 1);
     } catch (error) {
       const details = error as { name?: string; statusCode?: number };
       const invalidOutput = generated || /NoObjectGenerated|NoOutputGenerated|NoContentGenerated|TypeValidation|JSONParse/.test(details.name ?? "");
@@ -70,7 +70,7 @@ export async function reviewItems(items: QlooItem[], profile: Profile, deadline:
   return validateVerdicts(output.verdicts, items);
 }
 
-export async function generatePlan(items: ReviewedItem[], profile: Profile) {
+export async function generatePlan(items: ReviewedItem[], profile: Profile): Promise<SessionPlan> {
   if (!items.some((item) => item.type === "artist" && item.verdict !== "exclude")) {
     throw new PlanningError("No reviewed music remains for the opening. Try other favorites.", 422);
   }
@@ -82,8 +82,12 @@ export async function generatePlan(items: ReviewedItem[], profile: Profile) {
   // Only the fields the planner needs. Attribution ("why_this") is added by the server afterwards.
   const qlooItems = approved.map(({ entity_id, name, type, release_year, description, verdict, safe_angles }) =>
     ({ entity_id, name, type, release_year, description, verdict, safe_angles }));
-  const output = await structured("plan", GEMINI_PLAN_MODEL, `${SESSION_PROMPT}\n\n${SESSION_CONTRACT}`, {
+  // Early attempts are strict so the model can improve with feedback. On the last attempt,
+  // a slot it still gets wrong is filled from the approved pool instead of failing the session.
+  let plan = null as SessionPlan | null;
+  await structured("plan", GEMINI_PLAN_MODEL, `${SESSION_PROMPT}\n\n${SESSION_CONTRACT}`, {
     profile, requirements, qloo_items: qlooItems,
-  }, generatedPlanSchema, (data) => { validatePlan(data, approved, topics); return data; }, Date.now() + 52_000);
-  return validatePlan(output, approved, topics);
+  }, generatedPlanSchema, (data, lastAttempt) => { plan = validatePlan(data, approved, topics, { fallback: lastAttempt }); return data; }, Date.now() + 52_000);
+  if (!plan) throw new PlanningError("Unable to create a valid plan.");
+  return plan;
 }

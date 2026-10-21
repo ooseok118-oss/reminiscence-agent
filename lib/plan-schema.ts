@@ -27,14 +27,16 @@ export type ReviewedItem = z.infer<typeof itemSchema> & Verdict;
 // Output IDs are checked against the exact input pool after generation. Avoid
 // complex UUID regexes in Google's constrained decoding schema.
 // "why_this" is not generated: the server writes it from Qloo explainability scores.
-const base = z.object({ entity_id: text(100), item: text(240), safe_angle: z.string().max(180) });
+// Counts are deliberately loose here: validatePlan trims extras and repairs harmless
+// formatting slips, so a safe plan is never thrown away over a fourth song.
+const base = z.object({ entity_id: z.string().max(100), item: z.string().max(240), safe_angle: z.string().max(180) });
 const utterance = text(300);
-const songs = z.array(text(120)).max(2);
+const list = (max: number) => z.array(text(max)).max(8);
 export const generatedPlanSchema = z.object({
-  opening_song: base.extend({ songs, caregiver_tip: utterance }),
-  conversation: z.array(base.extend({ prompts: z.array(utterance).length(3) })).min(1).max(3),
-  sensory_activity: base.extend({ activity: utterance, materials: z.array(text(80)).max(4) }),
-  closing: base.extend({ songs, caregiver_tip: utterance }),
+  opening_song: base.extend({ songs: list(120), caregiver_tip: utterance }),
+  conversation: z.array(base.extend({ prompts: z.array(utterance).min(1).max(6) })).min(1).max(6),
+  sensory_activity: base.extend({ activity: utterance, materials: list(80) }),
+  closing: base.extend({ songs: list(120), caregiver_tip: utterance }),
 });
 export type GeneratedPlan = z.infer<typeof generatedPlanSchema>;
 
@@ -108,56 +110,179 @@ export function leadWithItem(item: string, prompts: string[]): string[] {
   return index > 0 ? [prompts[index], ...prompts.slice(0, index), ...prompts.slice(index + 1)] : prompts;
 }
 
-const HARD_TOPICS =["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
+const HARD_TOPICS = ["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
+// Memory tests: asking to recall a date, or to name who starred in or sang something.
+// "Who sang along with you?" is a warm question and stays allowed.
+const QUIZ = /\b(remember|recall)\b|\b(what|which) year\b|\bwho (starred|played) in\b|\bwho sang (it|this|that|the)\b/i;
+// Asking someone to come up with titles or names is also a memory test.
+const TITLE_RECALL = /^(what|which) (songs?|films?|movies?|shows?|titles?|singers?|actors?|actresses)\b/i;
+const QUESTION_START = /^(what|how|who|where)\b/i;
 
-export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics: string[]): SessionPlan {
+// Compare text that may differ only in case, quotes, punctuation or accents.
+function loose(value: string) {
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
+    .replace(/[‘’“”'"`.,!?;:()\-]/g, "").replace(/\s+/g, " ").trim();
+}
+
+// Returns why a read-aloud line is unsafe or unsuitable, or null when it is fine.
+function lineProblem(line: string, topics: string[]): string | null {
+  if (line.split(/\s+/).length >= 25) return "Keep each read-aloud prompt under 25 words.";
+  if (QUIZ.test(line)) return "Do not quiz or request recall.";
+  for (const topic of [...HARD_TOPICS, ...topics].filter(Boolean)) {
+    const escaped = topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(line)) return "Plan touched a topic to avoid.";
+  }
+  return null;
+}
+
+function questionProblem(line: string, topics: string[]): string | null {
+  if (!QUESTION_START.test(line)) return "Start each conversation question with What, How, Who or Where; keep permission choices in caregiver tips.";
+  if (TITLE_RECALL.test(line)) return "Do not ask them to name songs, films, titles or people.";
+  return lineProblem(line, topics);
+}
+
+// Plain, safe wording used only when the model's own text for a slot cannot be used.
+const OPENING_TIP = "Play it softly. Listening quietly is fine, and you can pause anytime.";
+const CLOSING_TIP = "Play something calm to wind down, and thank them for sharing.";
+function questionsFor(item: ReviewedItem): string[] {
+  if (item.type === "artist") {
+    return [`What do you enjoy about the music of ${item.name}?`, "Who did you like to listen to music with?", "Where did you go to hear music or dance?"];
+  }
+  const kind = item.type === "movie" ? "films" : "TV";
+  return [`What do you enjoy about ${item.name}?`, `Who did you like to watch ${kind} with?`, `How did you spend evenings when ${item.name} was on?`];
+}
+function activityFor(item: ReviewedItem) {
+  return { activity: `Look at printed photos from ${item.name} together and talk about the clothes and colors.`, materials: [`Printed photos from ${item.name}`] };
+}
+
+type Entry = { entity_id: string; item: string; safe_angle: string };
+
+/**
+ * Checks a generated plan against the approved Qloo pool and the read-aloud rules.
+ * Normal mode throws on the first real problem so the model can retry with feedback.
+ * With `fallback` (the final attempt), any slot that cannot be used is filled from the
+ * approved pool with plain wording instead, so a safe plan is always released.
+ * Safety never relaxes: excluded items, unapproved angles and avoided topics stay out.
+ */
+export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics: string[], options: { fallback?: boolean } = {}): SessionPlan {
+  const fallback = options.fallback ?? false;
   const requirements = planRequirements(items);
-  const approved = (entityId: string) => items.find((item) => item.entity_id === entityId && item.verdict !== "exclude");
-  const entries = [plan.opening_song, ...plan.conversation, plan.sensory_activity, plan.closing];
-  for (const entry of entries) {
-    const item = approved(entry.entity_id);
-    if (!item || entry.item !== item.name) throw new Error("Plan used an item outside the approved Qloo pool.");
-    if (item.verdict === "caution" && !item.safe_angles.includes(entry.safe_angle)) throw new Error("Caution item needs an approved safe angle.");
-    if (item.verdict === "ok" && entry.safe_angle !== "") throw new Error("Unexpected safe angle.");
-    const utterances = "prompts" in entry ? entry.prompts : "activity" in entry ? [entry.activity] : [entry.caregiver_tip];
-    if ("prompts" in entry && entry.prompts.some((line) => !/^(what|how|who|where)\b/i.test(line))) {
-      throw new Error("Start each conversation question with What, How, Who or Where; keep permission choices in caregiver tips.");
-    }
-    if (utterances.some((line) => line.split(/\s+/).length >= 25)) throw new Error("Keep each read-aloud prompt under 25 words.");
-    const extras = "songs" in entry ? entry.songs : "materials" in entry ? entry.materials : [];
-    const allText = [entry.item, ...utterances, ...extras].join(" ");
-    if (/\b(remember|recall)\b|\b(what|which) year\b|\bwho (played|sang|starred)\b/i.test(allText)) throw new Error("Do not quiz or request recall.");
-    for (const topic of [...HARD_TOPICS, ...topics].filter(Boolean)) {
-      const escaped = topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      if (new RegExp(`\\b${escaped}\\b`, "i").test(allText)) throw new Error("Plan touched a topic to avoid.");
-    }
-  }
+  const pool = items.filter((item) => item.verdict !== "exclude");
+  const used = new Set<string>();
 
-  const kind = (entityId: string) => approved(entityId)!.type;
-  if (kind(plan.opening_song.entity_id) !== "artist") throw new Error("Opening needs a Qloo artist.");
-  if (kind(plan.closing.entity_id) !== "artist") throw new Error("Closing needs a Qloo artist.");
-  const conversationTypes = plan.conversation.map((entry) => kind(entry.entity_id)).sort();
-  if (conversationTypes.join() !== [...requirements.conversation_types].sort().join()) {
-    throw new Error(`Conversation needs exactly one item of each type: ${requirements.conversation_types.join(", ")}.`);
-  }
-  if (!requirements.sensory_types.includes(kind(plan.sensory_activity.entity_id))) {
-    throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
-  }
-  const conversationIds = plan.conversation.map((entry) => entry.entity_id);
-  if (new Set(conversationIds).size !== conversationIds.length) throw new Error("Use a different item for each conversation topic.");
-  if (requirements.distinct_music && plan.opening_song.entity_id === plan.closing.entity_id) throw new Error("Use different artists for the opening and closing.");
-  const allIds = entries.map((entry) => entry.entity_id);
-  if (requirements.all_distinct && new Set(allIds).size !== allIds.length) throw new Error("Never use the same item twice in one session.");
-
-  // Source attribution is deterministic: it comes from Qloo scores, never from the model.
-  const describe = (entityId: string): PlanEntry => {
-    const item = approved(entityId)!;
-    return { item: item.name, type: item.type, why_this: item.why_this ?? "" };
+  // The entity_id is authoritative; a name that differs only by quotes or case still resolves.
+  const resolve = (entry: Entry): ReviewedItem => {
+    const id = entry.entity_id.trim().toLowerCase();
+    const item = pool.find((candidate) => candidate.entity_id.toLowerCase() === id)
+      ?? (entry.item ? pool.find((candidate) => loose(candidate.name) === loose(entry.item)) : undefined);
+    if (!item) throw new Error("Plan used an item outside the approved Qloo pool.");
+    if (lineProblem(item.name, topics)) throw new Error("Plan touched a topic to avoid.");
+    if (item.verdict === "caution") {
+      const given = loose(entry.safe_angle);
+      const angle = item.safe_angles.find((option) => loose(option) === given)
+        ?? (given ? item.safe_angles.find((option) => loose(option).includes(given) || given.includes(loose(option))) : undefined);
+      if (!angle) throw new Error(`Caution item ${item.name} needs one of its approved safe angles.`);
+    }
+    return item;
   };
+  const describe = (item: ReviewedItem): PlanEntry => ({ item: item.name, type: item.type, why_this: item.why_this ?? "" });
+  const instruction = (line: string, backup: string) => {
+    const problem = lineProblem(line, topics);
+    if (!problem) return line;
+    if (fallback) return backup;
+    throw new Error(problem);
+  };
+  // Optional extras: an unsuitable song or material is dropped, never allowed through.
+  const extras = (values: string[], max: number) => values.filter((value) => !lineProblem(value, topics)).slice(0, max);
+  // An approved item not yet used. Plain wording is only paired with "ok" items, except
+  // music, where listening stays within any music-related safe angle.
+  const spare = (kinds: ItemType[], avoid: Set<string>) => {
+    const fits = (item: ReviewedItem) => kinds.includes(item.type) && !lineProblem(item.name, topics)
+      && (item.verdict === "ok" || item.type === "artist");
+    const choice = pool.find((item) => fits(item) && !avoid.has(item.entity_id)) ?? pool.find(fits);
+    if (!choice) throw new Error("Not enough approved Qloo items to build a session. Try other favorites.");
+    return choice;
+  };
+  const attempt = <T,>(build: () => T, backup: () => T): T => {
+    try { return build(); } catch (error) { if (!fallback) throw error; return backup(); }
+  };
+
+  const opening = attempt(() => {
+    const item = resolve(plan.opening_song);
+    if (item.type !== "artist") throw new Error("Opening needs a Qloo artist.");
+    return { ...describe(item), id: item.entity_id, songs: extras(plan.opening_song.songs, 2), caregiver_tip: instruction(plan.opening_song.caregiver_tip, OPENING_TIP) };
+  }, () => {
+    const item = spare(["artist"], used);
+    return { ...describe(item), id: item.entity_id, songs: [], caregiver_tip: OPENING_TIP };
+  });
+  used.add(opening.id);
+
+  // One topic per required type. Extra or unusable topics are skipped when a good one exists.
+  const conversation: (PlanEntry & { id: string; prompts: string[] })[] = [];
+  for (const kind of requirements.conversation_types) {
+    let problem = `Conversation needs exactly one item of each type: ${requirements.conversation_types.join(", ")}.`;
+    let topic: (PlanEntry & { id: string; prompts: string[] }) | null = null;
+    for (const entry of plan.conversation) {
+      try {
+        const item = resolve(entry);
+        if (item.type !== kind || conversation.some((chosen) => chosen.id === item.entity_id)) continue;
+        if (fallback && requirements.all_distinct && used.has(item.entity_id)) continue;
+        let prompts = entry.prompts.filter((line) => !questionProblem(line, topics));
+        if (prompts.length < 3 && fallback && item.verdict === "ok") {
+          prompts = [...prompts, ...questionsFor(item).filter((line) => !prompts.includes(line))];
+        }
+        if (prompts.length < 3) {
+          const bad = entry.prompts.find((line) => questionProblem(line, topics));
+          problem = bad ? questionProblem(bad, topics)! : "Write at least three questions for each conversation item.";
+          continue;
+        }
+        topic = { ...describe(item), id: item.entity_id, prompts: leadWithItem(item.name, prompts.slice(0, 3)) };
+        break;
+      } catch (error) {
+        problem = error instanceof Error ? error.message : problem;
+      }
+    }
+    if (!topic) {
+      if (!fallback) throw new Error(problem);
+      const item = spare([kind], new Set([...used, ...conversation.map((chosen) => chosen.id)]));
+      topic = { ...describe(item), id: item.entity_id, prompts: questionsFor(item) };
+    }
+    conversation.push(topic);
+    used.add(topic.id);
+  }
+
+  const sensory = attempt(() => {
+    const item = resolve(plan.sensory_activity);
+    if (!requirements.sensory_types.includes(item.type)) throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
+    if (fallback && requirements.all_distinct && used.has(item.entity_id)) throw new Error("Already used.");
+    const backup = activityFor(item);
+    const activity = instruction(plan.sensory_activity.activity, backup.activity);
+    return { ...describe(item), id: item.entity_id, activity, materials: activity === backup.activity ? backup.materials : extras(plan.sensory_activity.materials, 4) };
+  }, () => {
+    const item = spare(requirements.sensory_types, used);
+    return { ...describe(item), id: item.entity_id, ...activityFor(item) };
+  });
+  used.add(sensory.id);
+
+  const closing = attempt(() => {
+    const item = resolve(plan.closing);
+    if (item.type !== "artist") throw new Error("Closing needs a Qloo artist.");
+    if (requirements.distinct_music && item.entity_id === opening.id) throw new Error("Use different artists for the opening and closing.");
+    if (fallback && requirements.all_distinct && used.has(item.entity_id)) throw new Error("Already used.");
+    return { ...describe(item), id: item.entity_id, songs: extras(plan.closing.songs, 2), caregiver_tip: instruction(plan.closing.caregiver_tip, CLOSING_TIP) };
+  }, () => {
+    const item = spare(["artist"], used);
+    return { ...describe(item), id: item.entity_id, songs: [], caregiver_tip: CLOSING_TIP };
+  });
+
+  const ids = [opening.id, ...conversation.map((topic) => topic.id), sensory.id, closing.id];
+  if (!fallback && requirements.all_distinct && new Set(ids).size !== ids.length) throw new Error("Never use the same item twice in one session.");
+
+  const strip = <T extends { id: string }>({ id, ...rest }: T) => { void id; return rest; };
   return {
-    opening_song: { ...describe(plan.opening_song.entity_id), songs: plan.opening_song.songs, caregiver_tip: plan.opening_song.caregiver_tip },
-    conversation: plan.conversation.map((entry) => ({ ...describe(entry.entity_id), prompts: leadWithItem(entry.item, entry.prompts) })),
-    sensory_activity: { ...describe(plan.sensory_activity.entity_id), activity: plan.sensory_activity.activity, materials: plan.sensory_activity.materials },
-    closing: { ...describe(plan.closing.entity_id), songs: plan.closing.songs, caregiver_tip: plan.closing.caregiver_tip },
+    opening_song: strip(opening),
+    conversation: conversation.map(strip),
+    sensory_activity: strip(sensory),
+    closing: strip(closing),
   };
 }
