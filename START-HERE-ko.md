@@ -1,8 +1,8 @@
-# 1단계: 프로젝트 실행 → GitHub 공개 저장소 → Vercel 배포
+# 실행 안내: Profile 화면과 GitHub · Vercel 배포
 
 전체 코드는 https://github.com/ooseok118-oss/reminiscence-agent 에 있습니다. 저장소의 Code → Download ZIP으로 내려받아 압축을 풀고, package.json과 app 폴더가 보이는 프로젝트 폴더를 VS Code에서 여세요. GitHub 저장소 공개는 완료됐으므로 아래 3절은 새 저장소를 직접 만들 때만 참고하면 됩니다.
 
-현재 완료된 범위는 영어 안내 화면과 Next.js 프로젝트 구성입니다. 프로필 폼은 2단계에서 만듭니다. GitHub 공개 저장소와 Vercel production 배포가 완료됐습니다. https://reminiscence-agent.vercel.app 에서 첫 화면을 열 수 있습니다. 이미 배포돼 있으므로 아래 GitHub 공개와 Vercel 배포 절차는 직접 다시 설정할 때의 참고입니다.
+현재 2단계 Profile 화면이 구현돼 있습니다. 프로필 폼은 2단계에서 만듭니다. GitHub 공개 저장소와 Vercel production 배포가 완료됐습니다. https://reminiscence-agent.vercel.app 에서 Profile 화면을 열 수 있습니다. 이미 배포돼 있으므로 아래 GitHub 공개와 Vercel 배포 절차는 직접 다시 설정할 때의 참고입니다.
 
 ## 1. 컴퓨터에서 실행
 
@@ -204,4 +204,9 @@ npm run start
 - 인증 정보가 없는 HTTP 요청으로 공개 production 주소의 200 응답, 영어 첫 화면과 면책 문구를 확인했습니다.
 - GitHub main 브랜치가 연결돼 있어 변경을 올리면 Vercel에서 자동 배포됩니다.
 - 실제 API 키는 저장소에 포함하지 않았습니다. 현재 안내 화면은 키 없이 작동합니다.
-- Profile 폼은 다음 2단계에서 만듭니다.
+- Profile 폼: 별칭, 출생 연도, 고향, 취향 1~3개, 피할 주제와 자유 입력을 지원합니다.
+- 각 취향의 종류는 Singer / Movie / TV show 중 선택합니다.
+- Try an example을 누르면 Mary / 1948 / Columbus, Ohio / Elvis Presley(Singer) / Roman Holiday(Movie) / War 예시가 채워집니다.
+- Review profile을 누르면 값을 검사하고 브라우저 개발자 도구의 Console에 `Reminiscence Agent profile`과 입력 JSON을 출력합니다. Chrome에서는 메뉴 → More tools → Developer tools → Console을 여세요.
+- 제출 후 확인 문구가 표시되며, 아직 세션은 생성하지 않습니다. 새로고침하면 입력은 초기화됩니다.
+- Gemini 키는 본인 Google 계정으로 https://aistudio.google.com/apikey 에서 발급한 뒤 향후 GEMINI_API_KEY 서버 환경변수로 등록합니다. 키를 이 저장소나 대화에 넣지 않습니다.

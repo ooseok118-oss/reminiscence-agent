@@ -4,12 +4,16 @@ A conversation aid for caregivers and families, inspired by familiar favorites.
 
 ## Status
 
-Step 1 complete: a deployed Next.js starter with an English placeholder page.
+Step 2: an English caregiver profile form with a one-click example, typed favorites, and topics to avoid.
 
 Live demo: https://reminiscence-agent.vercel.app
 
 Production is connected to the main branch of this GitHub repository.
-Profile entry and Qloo/Gemini integration will be added in later steps.
+The form accepts a first name or nickname, birth year, hometown, 1–3 favorites,
+and optional topics to avoid. Every favorite has a Singer / Movie / TV show selector.
+Submitting validates the form and prints a typed profile to the browser console
+with the label `Reminiscence Agent profile`. It does not call a planning API or
+persist the profile. Qloo/Gemini integration will be added in later steps.
 
 ## Stack
 
@@ -49,7 +53,7 @@ npm run build
 
 ## Environment variables
 
-The placeholder page builds and runs without API keys.
+The profile form builds and runs without API keys.
 When integrations are added, create `.env.local` using `.env.example` and fill
 in `QLOO_API_KEY` and `GEMINI_API_KEY` locally. Set the same variables in the
 Vercel project settings. Never commit `.env.local` or real credentials.
@@ -63,10 +67,22 @@ Publish this folder as a public GitHub repository, including `LICENSE`,
 Import the repository into Vercel with the Next.js framework preset and the
 repository root as the Root Directory. The default build command is `npm run build`.
 Use Node.js 24.x in the project settings. No environment variables are required
-for the current placeholder. Open the production URL after the deployment is ready.
+for the current profile form. Open the production URL after the deployment is ready.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
 A conversation aid, not medical advice.
+
+## Profile payload
+
+See `lib/profile.ts` for the shared TypeScript types. `knownFavorites[].type` uses
+`artist`, `movie`, or `tv_show`, ready for the later Qloo resolve route.
+`topicsToAvoid` contains selected checkbox labels; `otherTopicsToAvoid` preserves
+the optional free-text instructions.
+
+## Repository checks
+
+Verified the public repository has no tracked `.env.local`, and GitHub recognizes
+`LICENSE` as MIT (`spdx_id: MIT`). `.env.example` contains variable names only.
