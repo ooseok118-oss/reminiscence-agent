@@ -48,7 +48,10 @@ test("explanations preserve source identity and raw scores, with no invented sco
   assert.equal(explanation([{ ...seeds[0], score: 0.57 }, { ...seeds[1], score: 0.43 }]), "Inspired by both Roman Holiday and Elvis Presley");
   assert.equal(normalizeItem(raw, "tv_show", seeds, false), null);
   const third = { entity_id: "C", name: "Casablanca", type: "movie", popularity: 0.99, release_year: 1942 };
-  assert.equal(explanation([{ ...seeds[1], score: 0.35 }, { ...seeds[0], score: 0.33 }, { ...third, score: 0.32 }]), "Inspired by Elvis Presley, Roman Holiday and Casablanca");
-  assert.equal(explanation([{ ...seeds[1], score: 0.55 }, { ...seeds[0], score: 0.25 }, { ...third, score: 0.2 }]), "Mostly inspired by Elvis Presley, with a touch of Roman Holiday and Casablanca");
+  assert.equal(explanation([{ ...seeds[1], score: 0.35 }, { ...seeds[0], score: 0.33 }, { ...third, score: 0.32 }]), "Inspired most by Elvis Presley and Roman Holiday");
+  assert.equal(explanation([{ ...seeds[1], score: 0.55 }, { ...seeds[0], score: 0.25 }, { ...third, score: 0.2 }]), "Mostly inspired by Elvis Presley");
+  const learned = { entity_id: "D", name: "Louis Armstrong", score: 0.24, origin: "session" };
+  assert.equal(explanation([{ ...seeds[1], score: 0.26 }, learned, { ...seeds[0], score: 0.25 }, { ...third, score: 0.25 }]), "Because they enjoyed Louis Armstrong in an earlier session");
+  assert.equal(explanation([{ ...seeds[1], score: 0.6 }, { ...learned, score: 0.2 }, { ...seeds[0], score: 0.2 }]), "Mostly inspired by Elvis Presley");
   assert.equal(explanation([{ ...seeds[0], score: 1 }]), "People who love Roman Holiday often love this too");
 });

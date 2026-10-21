@@ -6,9 +6,11 @@ export type Seed = {
   type: FavoriteType;
   popularity: number | null;
   release_year: number | null;
+  /** "session" when the agent added it because the person enjoyed it in an earlier session. */
+  origin?: "favorite" | "session";
 };
 
-export type Contribution = { entity_id: string; name: string; score: number };
+export type Contribution = { entity_id: string; name: string; score: number; origin?: "favorite" | "session" };
 export type QlooItem = {
   entity_id: string;
   name: string;

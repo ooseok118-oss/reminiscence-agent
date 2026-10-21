@@ -103,7 +103,9 @@ test("the session shape is enforced when the pool can supply it", () => {
   assert.throws(() => validatePlan(bad, items, []), /one item of each type/);
   bad = plan(); bad.closing = entry(sinatra, { songs: [], caregiver_tip: "Offer quiet listening." });
   assert.throws(() => validatePlan(bad, items, []), /different artists/);
-  bad = plan(); bad.sensory_activity = entry(happyDays, { activity: "Look at photos of the diner set together.", materials: ["Printed photos"] });
+  const revisit = plan(); revisit.sensory_activity = entry(happyDays, { activity: "Look at photos of the Happy Days diner set together.", materials: ["Printed photos"] });
+  assert.equal(validatePlan(generatedPlanSchema.parse(revisit), items, []).sensory_activity.item, "Happy Days");  // revisiting a topic is fine
+  bad = plan(); bad.closing = entry(armstrong, { songs: [], caregiver_tip: "Offer quiet listening." });
   assert.throws(() => validatePlan(bad, items, []), /same item twice/);
   bad = plan(); bad.closing = entry(fairLady, { songs: [], caregiver_tip: "Offer quiet listening." });
   assert.throws(() => validatePlan(bad, items, []), /Closing needs a Qloo artist/);

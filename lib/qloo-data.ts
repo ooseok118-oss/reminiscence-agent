@@ -36,19 +36,20 @@ export function overlapsEra(start: number | null, end: number | null, from: numb
   return start !== null && start <= to && (end === null || end >= from) && (end === null || end >= start);
 }
 
-function list(names: string[]) {
-  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-}
-
 export function explanation(contributions: Contribution[]): string | null {
   if (!contributions.length) return null;
-  const [first, second, ...rest] = contributions;
+  const [first, second, ...rest] = [...contributions].sort((a, b) => b.score - a.score);
+  // Something they enjoyed in an earlier session, pulling about as hard as anything else:
+  // the clearest sign the plan learned from them, so it is named first.
+  const learned = contributions.find((item) => item.origin === "session" && item.score >= first.score * 0.9);
+  if (learned) return `Because they enjoyed ${learned.name} in an earlier session`;
   // One favorite: say what the taste graph found, not just the source.
   if (!second) return `People who love ${first.name} often love this too`;
   // One favorite "leads" when it clearly outweighs the next (0.58 vs 0.42 with two favorites).
-  return first.score - second.score >= 0.16
-    ? `Mostly inspired by ${first.name}, with a touch of ${list([second, ...rest].map((item) => item.name))}`
-    : `Inspired by ${rest.length ? "" : "both "}${list(contributions.map((item) => item.name))}`;
+  if (first.score - second.score >= 0.16) {
+    return rest.length ? `Mostly inspired by ${first.name}` : `Mostly inspired by ${first.name}, with a touch of ${second.name}`;
+  }
+  return rest.length ? `Inspired most by ${first.name} and ${second.name}` : `Inspired by both ${first.name} and ${second.name}`;
 }
 
 export function normalizeItem(raw: unknown, type: FavoriteType, seeds: Seed[], queryWarning: boolean): QlooItem | null {
@@ -64,7 +65,7 @@ export function normalizeItem(raw: unknown, type: FavoriteType, seeds: Seed[], q
       const seed = seeds.find((seed) => seed.entity_id.toUpperCase() === String(contribution.entity_id).toUpperCase());
       const score = number(contribution.score);
       if (seed && score !== null && score >= 0 && score <= 1 && !because_of.some((item) => item.entity_id === seed.entity_id)) {
-        because_of.push({ entity_id: seed.entity_id, name: seed.name, score });
+        because_of.push({ entity_id: seed.entity_id, name: seed.name, score, origin: seed.origin });
       }
     }
   }

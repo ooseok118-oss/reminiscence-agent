@@ -59,7 +59,7 @@ export function expansionInput(body: Record<string, unknown>): { birthYear: numb
       throw new QlooError("Invalid resolved favorite. Please search again.", 400);
     }
     return { entity_id: item.entity_id.toUpperCase(), name: item.name.trim(), type: item.type as FavoriteType,
-      popularity: null, release_year: null } satisfies Seed;
+      popularity: null, release_year: null, ...(item.origin === "session" ? { origin: "session" as const } : {}) } satisfies Seed;
   });
   return { birthYear: body.birthYear as number, seeds: [...new Map(seeds.map((seed) => [seed.entity_id, seed])).values()] };
 }

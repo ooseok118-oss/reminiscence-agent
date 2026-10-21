@@ -73,7 +73,8 @@ export type PlanRequirements = {
   conversation_types: ItemType[];
   /** Types the sensory activity may use. */
   sensory_types: ItemType[];
-  /** True when the approved pool is large enough for six different items. */
+  /** True when the pool allows different items for the opening, closing and each topic.
+   *  The sensory activity may revisit a conversation film or show. */
   all_distinct: boolean;
   /** True when the opening and closing can use different artists. */
   distinct_music: boolean;
@@ -92,8 +93,8 @@ export function planRequirements(items: ReviewedItem[]): PlanRequirements {
   if (artists >= 3) conversation_types.push("artist");
   if (!conversation_types.length) conversation_types.push("artist");
   const sensory_types: ItemType[] = movies + shows ? ["movie", "tv_show"] : ["artist"];
-  const artistsNeeded = 2 + (conversation_types.includes("artist") ? 1 : 0) + (sensory_types.includes("artist") ? 1 : 0);
-  const visualsNeeded = conversation_types.filter((kind) => kind !== "artist").length + (sensory_types.includes("artist") ? 0 : 1);
+  const artistsNeeded = 2 + (conversation_types.includes("artist") ? 1 : 0);
+  const visualsNeeded = conversation_types.filter((kind) => kind !== "artist").length;
   return {
     conversation_types, sensory_types,
     all_distinct: artists >= artistsNeeded && movies + shows >= visualsNeeded,
@@ -254,7 +255,6 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
   const sensory = attempt(() => {
     const item = resolve(plan.sensory_activity);
     if (!requirements.sensory_types.includes(item.type)) throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
-    if (fallback && requirements.all_distinct && used.has(item.entity_id)) throw new Error("Already used.");
     const backup = activityFor(item);
     const activity = instruction(plan.sensory_activity.activity, backup.activity);
     return { ...describe(item), id: item.entity_id, activity, materials: activity === backup.activity ? backup.materials : extras(plan.sensory_activity.materials, 4) };
@@ -275,7 +275,8 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
     return { ...describe(item), id: item.entity_id, songs: [], caregiver_tip: CLOSING_TIP };
   });
 
-  const ids = [opening.id, ...conversation.map((topic) => topic.id), sensory.id, closing.id];
+  // The sensory activity may revisit a conversation film or show; everything else stays distinct.
+  const ids = [opening.id, ...conversation.map((topic) => topic.id), closing.id];
   if (!fallback && requirements.all_distinct && new Set(ids).size !== ids.length) throw new Error("Never use the same item twice in one session.");
 
   const strip = <T extends { id: string }>({ id, ...rest }: T) => { void id; return rest; };

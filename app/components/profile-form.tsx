@@ -211,7 +211,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     try {
       const replan = await post<ReplanResponse>("/api/replan", {
         profile, note, feedback, shown_ids: shown,
-        seeds: latestSeeds.map(({ entity_id, name, type }) => ({ entity_id, name, type })),
+        seeds: latestSeeds.map(({ entity_id, name, type, origin }) => ({ entity_id, name, type, origin })),
       }, signal);
       setNextRun((run) => ({ ...run, stage: "review", decision: replan.decision, result: replan.expansion }));
       setProgress("Checking topics to avoid…");

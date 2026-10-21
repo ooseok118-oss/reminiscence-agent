@@ -16,7 +16,7 @@ export const feedbackSchema = z.object({ entity_id: uuid, name, type, reaction: 
 export type Feedback = z.infer<typeof feedbackSchema>;
 
 export const replanRequestSchema = z.object({
-  seeds: z.array(z.object({ entity_id: uuid, name, type })).min(1).max(4),
+  seeds: z.array(z.object({ entity_id: uuid, name, type, origin: z.enum(["favorite", "session"]).optional() })).min(1).max(4),
   feedback: z.array(feedbackSchema).min(1).max(12),
   note: z.string().trim().max(300),
   shown_ids: z.array(uuid).max(80),
@@ -49,8 +49,9 @@ export type AgentDecision = {
 export type ReplanResponse = { decision: AgentDecision; expansion: Expansion; profile: Profile };
 
 type Request = z.infer<typeof replanRequestSchema>;
-const asSeed = (item: { entity_id: string; name: string; type: Seed["type"] }): Seed =>
-  ({ entity_id: item.entity_id.toUpperCase(), name: item.name, type: item.type, popularity: null, release_year: null });
+// Items added from feedback are marked "session" so "Why this" can say they were enjoyed before.
+const asSeed = (item: { entity_id: string; name: string; type: Seed["type"]; origin?: Seed["origin"] }, origin = item.origin ?? "favorite"): Seed =>
+  ({ entity_id: item.entity_id.toUpperCase(), name: item.name, type: item.type, popularity: null, release_year: null, origin });
 const same = (a: string, b: string) => a.toUpperCase() === b.toUpperCase();
 
 function topicList(values: string[], existing: string[]) {
@@ -77,7 +78,7 @@ export function applyDecision(request: Request, output: AgentDecisionOutput, exi
   let kept = request.seeds.filter((seed) => output.keep_favorites.some((id) => same(id, seed.entity_id)));
   if (!kept.length && !added.length) kept = request.seeds;
   kept = kept.slice(0, MAX_SEEDS - added.length);
-  const seeds = [...new Map([...kept, ...added].map((item) => [item.entity_id.toUpperCase(), asSeed(item)])).values()];
+  const seeds = [...new Map([...kept.map((item) => asSeed(item)), ...added.map((item) => asSeed(item, "session"))].map((seed) => [seed.entity_id, seed])).values()];
   return {
     seeds,
     added: added.map((item) => item.name),
@@ -102,7 +103,7 @@ export function ruleDecision(request: Request, firstName: string): AgentDecision
     "Everything already used is left out so the session feels fresh.",
   ];
   return {
-    seeds: [...new Map([...kept, ...enjoyed].map((item) => [item.entity_id.toUpperCase(), asSeed(item)])).values()],
+    seeds: [...new Map([...kept.map((item) => asSeed(item)), ...enjoyed.map((item) => asSeed(item, "session"))].map((seed) => [seed.entity_id, seed])).values()],
     added: enjoyed.map((item) => item.name),
     set_aside: uneasy,
     extra_topics: [],

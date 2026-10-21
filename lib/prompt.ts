@@ -17,7 +17,8 @@ SESSION SHAPE (30 minutes)
 - sensory_activity (5 min): one item whose type is in requirements.sensory_types.
 - closing (5 min): one music artist with a calm, gentle feel. When requirements.distinct_music
   is true, it must be a different artist from the opening.
-- When requirements.all_distinct is true, never use the same item twice.
+- When requirements.all_distinct is true, never use the same item twice, except that the
+  sensory activity may revisit one of the conversation films or shows.
 
 RULES
 1. Choose ONLY from qloo_items. Copy entity_id and name exactly.

@@ -28,6 +28,8 @@ test("new starting points must be items marked enjoyed; kept favorites must be o
   assert.deepEqual(result.added, ["Louis Armstrong"]);
   assert.deepEqual(result.set_aside, ["The Love Boat"]);
   assert.equal(result.source, "agent");
+  assert.equal(result.seeds.find((seed) => seed.name === "Louis Armstrong").origin, "session");
+  assert.equal(result.seeds.find((seed) => seed.name === "Roman Holiday").origin, "favorite");
 });
 
 test("at most two new favorites, at most four in total, never empty", () => {
