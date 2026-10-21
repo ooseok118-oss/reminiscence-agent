@@ -134,6 +134,11 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
   if (!requirements.sensory_types.includes(kind(plan.sensory_activity.entity_id))) {
     throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
   }
+  // The first question ties the topic to the Qloo item, so the caregiver sees why it was chosen.
+  const core = (value: string) => value.toLowerCase().replace(/[‘’]/g, "'").replace(/^the\s+/, "").replace(/\s+/g, " ").trim();
+  for (const entry of plan.conversation) {
+    if (!core(entry.prompts[0]).includes(core(entry.item))) throw new Error(`The first question about ${entry.item} must name it.`);
+  }
   const conversationIds = plan.conversation.map((entry) => entry.entity_id);
   if (new Set(conversationIds).size !== conversationIds.length) throw new Error("Use a different item for each conversation topic.");
   if (requirements.distinct_music && plan.opening_song.entity_id === plan.closing.entity_id) throw new Error("Use different artists for the opening and closing.");

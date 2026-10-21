@@ -25,11 +25,16 @@ RULES
    what they wore, dances, dates, family routines. Ask open questions that start with
    What, How, Who or Where. Never quiz ("Do you remember...?", "What year...?").
    Memory tests cause stress.
-4. Each question carries one concrete, pleasant detail taken from the item's description,
-   or a lead star you are certain of. If unsure, leave the detail out. Never invent.
+4. The FIRST question for each item names the item and one concrete, pleasant detail taken
+   from its description, or a lead star you are certain of, then links it to their life.
+   Example: "What did you wear for evenings out, like Audrey Hepburn in Breakfast at Tiffany's?"
+   The second and third questions move into the person's own memories.
+   If unsure of a detail, leave it out. Never invent.
 5. For caution items, set safe_angle to one of its safe_angles and stay inside that angle.
 6. Music: in "songs", name up to 2 recordings only if you are certain they are among the
-   artist's best-known, gentle, upbeat songs. Otherwise return an empty list.
+   artist's best-known, gentle, upbeat songs. Never choose songs about death, the end of
+   life, farewells, loss or heartbreak (for example, not "My Way"). If unsure, return an
+   empty list.
 7. The sensory activity uses sight, touch or gentle seated movement with everyday things a
    care home has (printed photos, a soft scarf, a hat, clapping or tapping a rhythm).
    List them in "materials".
@@ -50,6 +55,7 @@ For a caution item, safe_angle MUST equal one of its safe_angles exactly, and al
 For an ok item, safe_angle is an empty string. Never use excluded items.
 opening_song and closing MUST be artists. Conversation item types MUST match requirements.conversation_types exactly, one item per type.
 Every conversation question must start with What, How, Who or Where. Put yes/no permission or listening choices in caregiver tips instead.
+The first question of each conversation item MUST contain the item's exact name.
 Do not quiz about dates, names, places, facts or whether the person remembers anything. Never use the words "remember" or "recall".
 Use only music, stars, dance, clothing, outings, the people they shared it with, or positive sensory experiences.
 Do not discuss sensitive plots, biographies, lyrics or deaths.

@@ -6,6 +6,7 @@ import type { Expansion, Seed } from "@/lib/qloo-types";
 import QlooResults, { RecognizedFavorites } from "./qloo-results";
 import type { PlanResponse, ReviewResponse } from "@/lib/plan-schema";
 import PlanningResults from "./planning-results";
+import AgentProgress, { type AgentStage } from "./agent-progress";
 
 type FavoriteRow = { id: number; type: FavoriteType; name: string };
 
@@ -34,6 +35,8 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<AgentStage>("idle");
+  const [failed, setFailed] = useState(false);
   const [seeds, setSeeds] = useState<Seed[]>([]);
   const [result, setResult] = useState<Expansion | null>(null);
   const [review, setReview] = useState<ReviewResponse | null>(null);
@@ -45,6 +48,8 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   function clearFeedback() {
     setError("");
     setProgress("");
+    setStage("idle");
+    setFailed(false);
     setSeeds([]);
     setResult(null);
     setReview(null);
@@ -131,23 +136,29 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       return data as T;
     }
     try {
-      setProgress("Finding your favorites in Qloo’s taste graph…");
+      setStage("resolve");
+      setProgress("Finding their favorites in Qloo’s taste graph…");
       // Only favorite names/types and birth year are needed for Qloo.
       const resolved = await post<{ seeds: Seed[] }>("/api/resolve", { knownFavorites: profile.knownFavorites });
       setSeeds(resolved.seeds);
-      setProgress("Expanding to movies, TV shows and music… This may take a little while.");
+      setStage("expand");
+      setProgress("Following their taste to films, TV and music. This usually takes 10 to 20 seconds.");
       const expanded = await post<Expansion>("/api/expand", { birthYear: profile.birthYear, seeds: resolved.seeds });
       setResult(expanded);
-      setProgress("Checking topics to avoid and finding gentle ways to use familiar favorites…");
+      setStage("review");
+      setProgress("Checking topics to avoid…");
       const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile, proof: expanded.proof });
       setReview(screened);
-      setProgress(`Set aside ${screened.review.counts.exclude} items that touch on topics to avoid. Planning a gentle session…`);
+      setStage("plan");
+      setProgress(`Set aside ${screened.review.counts.exclude} items that touch on topics to avoid. Writing a 30-minute session…`);
       const session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
       setPlanned(session);
-      setProgress(`Your session plan is ready below. Set aside ${screened.review.counts.exclude} items; kept ${screened.review.counts.caution} with specific safe angles.`);
+      setStage("done");
+      setProgress("Your 30-minute session is ready.");
     } catch (error) {
       if (!controller.signal.aborted) {
         setError(error instanceof Error ? error.message : "Unable to load results. Please try again.");
+        setFailed(true);
         setProgress("");
       }
     } finally {
@@ -159,9 +170,9 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   return (
     <section
       aria-labelledby="profile-heading"
-      className="min-w-0 rounded-3xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8"
+      className="min-w-0 rounded-3xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8 print:border-0 print:p-0 print:shadow-none"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 print:hidden">
         <div>
           <p className="text-sm font-medium text-teal-800">Let&apos;s get to know them</p>
           <h2 id="profile-heading" className="mt-2 text-3xl font-semibold tracking-tight">
@@ -172,14 +183,14 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           Try an example
         </button>
       </div>
-      <p className="mt-4 text-base leading-relaxed text-stone-600">
+      <p className="mt-4 text-base leading-relaxed text-stone-600 print:hidden">
         Tell us a little about the person you care for. A nickname is welcome.
       </p>
-      <p className="mt-2 text-sm leading-relaxed text-stone-500">Your favorites are checked with Qloo. Your profile and candidate items are sent to Gemini for screening and planning when you submit.</p>
+      <p className="mt-2 text-sm leading-relaxed text-stone-500 print:hidden">Your favorites are checked with Qloo. Your profile and candidate items are sent to Gemini for screening and planning when you submit.</p>
 
       <form
         aria-busy={busy}
-        className="mt-8 space-y-8"
+        className="mt-8 space-y-8 print:hidden"
         onSubmit={handleSubmit}
         onChange={clearFeedback}
         onInvalid={clearFeedback}
@@ -366,10 +377,9 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
         </fieldset>
 
         <div className="border-t border-stone-200 pt-6">
+          <AgentProgress stage={stage} failed={failed} seeds={seeds} result={result} review={review} />
           {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-4 text-rose-900">{error}</p> : null}
-          <p role="status" aria-live="polite" className={progress ? "mb-4 rounded-xl bg-teal-50 p-4 leading-relaxed text-teal-950" : "sr-only"}>
-            {progress}
-          </p>
+          <p role="status" aria-live="polite" className="sr-only">{progress}</p>
           <button
             type="submit"
             disabled={busy}
@@ -379,9 +389,14 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           </button>
         </div>
       </form>
-      {seeds.length > 0 ? <RecognizedFavorites seeds={seeds} /> : null}
-      <PlanningResults review={review} planned={planned} />
-      {result ? <details className="mt-6"><summary className="min-h-11 cursor-pointer font-semibold text-teal-900">Original Qloo data</summary><QlooResults result={result} /></details> : null}
+      <PlanningResults review={review} planned={planned} firstName={firstName.trim()} seeds={seeds} />
+      {result ? (
+        <details className="mt-6 print:hidden">
+          <summary className="min-h-11 cursor-pointer py-2 font-semibold text-teal-900">Everything Qloo found</summary>
+          {seeds.length > 0 ? <RecognizedFavorites seeds={seeds} /> : null}
+          <QlooResults result={result} />
+        </details>
+      ) : null}
     </section>
   );
 }

@@ -16,14 +16,14 @@ const cabaret = make(8, "Cabaret", "movie", { verdict: "exclude", why_this: null
 const items = [sinatra, cole, armstrong, fairLady, westSide, happyDays, waltons, cabaret];
 
 const entry = (item, extra) => ({ entity_id: item.entity_id, item: item.name, safe_angle: item.safe_angles[0] ?? "", ...extra });
-const questions = (topic) => [`What do you enjoy about ${topic}?`, `Who did you share ${topic} with?`, `Where did you hear ${topic}?`];
+const questions = (topic) => [`What do you enjoy about ${topic}?`, `Who did you share it with?`, `Where did you hear it?`];
 function plan() {
   return {
     opening_song: entry(sinatra, { songs: ["Fly Me to the Moon"], caregiver_tip: "Offer a familiar recording, with the choice to listen quietly." }),
     conversation: [
-      entry(westSide, { prompts: ["What do you enjoy about the dancing?", "How do the bright skirts make you feel?", "Who did you go dancing with?"] }),
+      entry(westSide, { prompts: ["What do you enjoy about the dancing in West Side Story?", "How do the bright skirts make you feel?", "Who did you go dancing with?"] }),
       entry(happyDays, { prompts: questions("Happy Days") }),
-      entry(armstrong, { prompts: questions("that trumpet") }),
+      entry(armstrong, { prompts: questions("Louis Armstrong’s trumpet") }),
     ],
     sensory_activity: entry(fairLady, { activity: "Look at photos of elegant hats together and try one on.", materials: ["Printed photos", "A hat"] }),
     closing: entry(cole, { songs: [], caregiver_tip: "Offer quiet listening, or a pause if that feels better." }),
@@ -79,7 +79,7 @@ test("excluded items, invented titles and unapproved caution angles cannot enter
 test("the session shape is enforced when the pool can supply it", () => {
   let bad = plan(); bad.conversation.pop();
   assert.throws(() => validatePlan(bad, items, []), /one item of each type/);
-  bad = plan(); bad.conversation[1] = entry(fairLady, { prompts: questions("the hats") });
+  bad = plan(); bad.conversation[1] = entry(fairLady, { prompts: questions("the hats in My Fair Lady") });
   assert.throws(() => validatePlan(bad, items, []), /one item of each type/);
   bad = plan(); bad.closing = entry(sinatra, { songs: [], caregiver_tip: "Offer quiet listening." });
   assert.throws(() => validatePlan(bad, items, []), /different artists/);
@@ -97,7 +97,7 @@ test("a sparse pool relaxes only what it cannot supply", () => {
   assert.equal(requirements.distinct_music, false);
   const small = {
     opening_song: entry(sinatra, { songs: [], caregiver_tip: "Offer a familiar recording." }),
-    conversation: [entry(fairLady, { prompts: questions("the hats") })],
+    conversation: [entry(fairLady, { prompts: questions("the hats in My Fair Lady") })],
     sensory_activity: entry(fairLady, { activity: "Look at photos of elegant hats together.", materials: ["Printed photos"] }),
     closing: entry(sinatra, { songs: [], caregiver_tip: "Offer quiet listening." }),
   };
@@ -105,20 +105,29 @@ test("a sparse pool relaxes only what it cannot supply", () => {
 });
 
 test("read-aloud text rejects quizzes, long prompts and avoided topics, including song titles", () => {
-  let bad = plan(); bad.conversation[1].prompts[0] = "What year do you remember this coming out?";
+  let bad = plan(); bad.conversation[1].prompts[1] = "What year do you remember this coming out?";
   assert.throws(() => validatePlan(bad, items, []), /quiz/);
-  bad = plan(); bad.conversation[1].prompts[0] = "What " + Array(24).fill("word").join(" ");
+  bad = plan(); bad.conversation[1].prompts[1] = "What " + Array(24).fill("word").join(" ");
   assert.throws(() => validatePlan(bad, items, []), /under 25/);
-  bad = plan(); bad.conversation[1].prompts[0] = "What did you enjoy about the war scenes?";
+  bad = plan(); bad.conversation[1].prompts[1] = "What did you enjoy about the war scenes?";
   assert.throws(() => validatePlan(bad, items, ["War"]), /topic to avoid/);
   bad = plan(); bad.closing.caregiver_tip = "Talk about hospitals.";
   assert.throws(() => validatePlan(bad, items, ["Hospitals"]), /topic to avoid/);
   bad = plan(); bad.opening_song.songs = ["Hospital Blues"];
   assert.throws(() => validatePlan(bad, items, ["Hospital Blues"]), /topic to avoid/);
-  bad = plan(); bad.conversation[1].prompts[0] = "Would you like to talk about this?";
+  bad = plan(); bad.conversation[1].prompts[1] = "Would you like to talk about this?";
   assert.throws(() => validatePlan(bad, items, []), /What, How, Who or Where/);
-  bad = plan(); bad.conversation[1].prompts[0] = "Who starred in this show?";
+  bad = plan(); bad.conversation[1].prompts[1] = "Who starred in this show?";
   assert.throws(() => validatePlan(bad, items, []), /quiz/);
+});
+
+test("the first question must name its item, allowing a dropped leading The and curly apostrophes", () => {
+  let bad = plan(); bad.conversation[1].prompts[0] = "What trips near the water did you enjoy?";
+  assert.throws(() => validatePlan(bad, items, []), /must name it/);
+  const ok = plan(); ok.conversation[1].prompts[0] = "What did you enjoy about Happy Days on a Tuesday night?";
+  assert.equal(validatePlan(generatedPlanSchema.parse(ok), items, []).conversation.length, 3);
+  const curly = plan(); curly.conversation[0].prompts[0] = "What do you enjoy about the dancing in West Side Story’s big scenes?";
+  assert.equal(validatePlan(generatedPlanSchema.parse(curly), items, []).conversation.length, 3);
 });
 
 test("malformed output and unbounded profiles fail schema validation", () => {
