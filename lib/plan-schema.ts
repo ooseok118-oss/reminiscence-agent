@@ -40,7 +40,9 @@ export const generatedPlanSchema = z.object({
 });
 export type GeneratedPlan = z.infer<typeof generatedPlanSchema>;
 
-type PlanEntry = { entity_id: string; item: string; type: ItemType; why_this: string };
+// `year` is the release or first-air year for films and shows (null for music), so the
+// plan can show how old the person was at the time.
+type PlanEntry = { entity_id: string; item: string; type: ItemType; why_this: string; year: number | null };
 export type SessionPlan = {
   opening_song: PlanEntry & { songs: string[]; caregiver_tip: string };
   conversation: (PlanEntry & { prompts: string[] })[];
@@ -186,7 +188,7 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
     }
     return item;
   };
-  const describe = (item: ReviewedItem): PlanEntry => ({ entity_id: item.entity_id, item: item.name, type: item.type, why_this: item.why_this ?? "" });
+  const describe = (item: ReviewedItem): PlanEntry => ({ entity_id: item.entity_id, item: item.name, type: item.type, why_this: item.why_this ?? "", year: item.type === "artist" ? null : item.release_year ?? null });
   const instruction = (line: string, backup: string) => {
     const problem = lineProblem(line, topics);
     if (!problem) return line;

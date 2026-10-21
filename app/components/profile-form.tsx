@@ -9,6 +9,7 @@ import type { AgentDecision, Feedback, ReplanResponse } from "@/lib/replan-schem
 import PlanningResults from "./planning-results";
 import AgentProgress, { joinNames, type AgentStage } from "./agent-progress";
 import AgentNote from "./agent-note";
+import type { Draft } from "./session-plan";
 
 type FollowUp = { decision: AgentDecision; review: ReviewResponse; planned: PlanResponse };
 type NextRun = { stage: AgentStage; failed: boolean; error: string; decision: AgentDecision | null; result: Expansion | null; review: ReviewResponse | null };
@@ -33,6 +34,27 @@ async function generateWithRetry(receipt: string, signal: AbortSignal, onRetry: 
     onRetry();
     return post<PlanResponse>("/api/plan", { action: "generate", receipt }, signal);
   }
+}
+
+// Saved plans live only in this browser on this device. Storage can be unavailable
+// (private windows, blocked site data), so every access is guarded and optional.
+const STORAGE_KEY = "reminiscence-agent:saved-v1";
+type SavedForm = { firstName: string; birthYear: string; hometown: string; favorites: FavoriteRow[]; topicsToAvoid: string[]; otherTopicsToAvoid: string };
+type Saved = {
+  version: 1; savedAt: number; form: SavedForm; profile: Profile; seeds: Seed[]; result: Expansion | null;
+  review: ReviewResponse; planned: PlanResponse; followUps: FollowUp[]; drafts: Record<number, Draft>;
+};
+function readSaved(): Saved | null {
+  try {
+    const data = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
+    return data?.version === 1 && data.planned?.plan && data.review?.review && data.profile ? data as Saved : null;
+  } catch { return null; }
+}
+function writeSaved(data: Saved) {
+  try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* saving is optional */ }
+}
+function clearSaved() {
+  try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* nothing to clear */ }
 }
 
 const planIds = (plan: SessionPlan) => [plan.opening_song, ...plan.conversation, plan.sensory_activity, plan.closing].map((entry) => entry.entity_id);
@@ -72,6 +94,8 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   const [planned, setPlanned] = useState<PlanResponse | null>(null);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [nextRun, setNextRun] = useState<NextRun>(IDLE_RUN);
+  const [drafts, setDrafts] = useState<Record<number, Draft>>({});
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
   // The profile behind the latest session; the agent may add topics to avoid over time.
   const sessionProfile = useRef<Profile | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
@@ -89,7 +113,49 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     setPlanned(null);
     setFollowUps([]);
     setNextRun(IDLE_RUN);
+    setDrafts({});
+    setRestoredAt(null);
     sessionProfile.current = null;
+  }
+
+  // Bring back a plan saved on this device, e.g. to mark reactions after the session.
+  useEffect(() => {
+    const saved = readSaved();
+    if (!saved) return;
+    setFirstName(saved.form.firstName);
+    setBirthYear(saved.form.birthYear);
+    setHometown(saved.form.hometown);
+    setFavorites(saved.form.favorites);
+    nextFavoriteId.current = Math.max(3, ...saved.form.favorites.map((row) => row.id + 1));
+    setTopicsToAvoid(saved.form.topicsToAvoid);
+    setOtherTopicsToAvoid(saved.form.otherTopicsToAvoid);
+    setSeeds(saved.seeds);
+    setResult(saved.result);
+    setReview(saved.review);
+    setPlanned(saved.planned);
+    setFollowUps(saved.followUps);
+    setDrafts(saved.drafts ?? {});
+    sessionProfile.current = saved.profile;
+    setRestoredAt(saved.savedAt);
+  }, []);
+
+  // Keep the saved copy current whenever a plan, a follow-up or a reaction changes.
+  useEffect(() => {
+    const profile = sessionProfile.current;
+    if (!planned || !review || !profile || busy) return;
+    writeSaved({
+      version: 1, savedAt: Date.now(), profile, seeds, result, review, planned, followUps, drafts,
+      form: { firstName, birthYear, hometown, favorites, topicsToAvoid, otherTopicsToAvoid },
+    });
+  }, [planned, review, followUps, drafts, seeds, result, busy, firstName, birthYear, hometown, favorites, topicsToAvoid, otherTopicsToAvoid]);
+
+  function startOver() {
+    clearSaved();
+    clearFeedback();
+    setFirstName(""); setBirthYear(""); setHometown("");
+    setFavorites([{ id: 1, type: "artist", name: "" }, { id: 2, type: "movie", name: "" }]);
+    setTopicsToAvoid([]); setOtherTopicsToAvoid("");
+    window.scrollTo({ top: 0 });
   }
 
   function fillExample() {
@@ -221,6 +287,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       const session = await generateWithRetry(screened.receipt, signal, () => setProgress("Writing the next session. Taking one more pass…"));
       sessionProfile.current = replan.profile;
       setFollowUps((items) => [...items, { decision: replan.decision, review: screened, planned: session }]);
+      setRestoredAt(null);
       setNextRun(IDLE_RUN);
       setProgress("The next session is ready.");
     } catch (error) {
@@ -253,6 +320,19 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
         Tell us a little about the person you care for. A nickname is welcome.
       </p>
       <p className="mt-2 text-sm leading-relaxed text-stone-500 print:hidden">Your favorites are checked with Qloo. Your profile and candidate items are sent to Gemini for screening and planning when you submit.</p>
+
+      {restoredAt && planned ? (
+        <div role="status" className="mt-6 rounded-2xl border border-teal-800/20 bg-teal-50 p-4 sm:p-5 print:hidden">
+          <p className="font-semibold text-teal-950">Welcome back. Your plan for {firstName || "them"} is saved on this device.</p>
+          <p className="mt-1 text-sm leading-relaxed text-teal-950/80">
+            Saved {new Date(restoredAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. After the session, mark how each item went at the end of the plan to get the next one.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <a href={`#session-heading-${followUps.length + 1}`} className="inline-flex min-h-11 items-center rounded-xl bg-teal-800 px-4 py-2 text-base font-semibold text-white hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700">Go to the latest plan</a>
+            <button type="button" onClick={startOver} className={secondaryButtonClass}>Start over</button>
+          </div>
+        </div>
+      ) : null}
 
       <form
         aria-busy={busy}
@@ -460,9 +540,13 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
         planned={planned}
         firstName={firstName.trim()}
         seeds={seeds}
+        birthYear={Number(birthYear)}
         sessionNumber={1}
         onPlanNext={followUps.length ? undefined : planNext}
         busy={nextRun.stage !== "idle" && !nextRun.failed}
+        draft={drafts[1]}
+        onDraftChange={(draft) => setDrafts((current) => ({ ...current, 1: draft }))}
+        scrollOnMount={!restoredAt}
       />
       {followUps.map((item, index) => (
         <div key={index} className="mt-10 space-y-6 border-t-2 border-teal-900/10 pt-10">
@@ -472,9 +556,13 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
             planned={item.planned}
             firstName={firstName.trim()}
             seeds={item.decision.seeds}
+            birthYear={Number(birthYear)}
             sessionNumber={index + 2}
             onPlanNext={index === followUps.length - 1 ? planNext : undefined}
             busy={nextRun.stage !== "idle" && !nextRun.failed}
+            draft={drafts[index + 2]}
+            onDraftChange={(draft) => setDrafts((current) => ({ ...current, [index + 2]: draft }))}
+            scrollOnMount={!restoredAt}
           />
         </div>
       ))}
@@ -491,6 +579,12 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           />
           {nextRun.error ? <p role="alert" className="rounded-xl bg-rose-50 p-4 text-rose-900">{nextRun.error} Your notes are kept; press the button again to retry.</p> : null}
         </div>
+      ) : null}
+      {planned ? (
+        <p className="mt-8 text-sm leading-relaxed text-stone-500 print:hidden">
+          Plans and notes are saved only in this browser, on this device.{" "}
+          <button type="button" onClick={startOver} className="min-h-11 font-semibold text-teal-900 underline underline-offset-4 focus-visible:outline-3 focus-visible:outline-teal-700">Clear and start over</button>
+        </p>
       ) : null}
       {result ? (
         <details className="mt-6 print:hidden">

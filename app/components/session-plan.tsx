@@ -47,15 +47,41 @@ function Part({ tone, minutes, title, children }: { tone: string; minutes: strin
   );
 }
 
-function Item({ name, kind, why }: { name: string; kind: keyof typeof KIND; why: string }) {
+// How old the person was when a film came out or a show first aired. Reminiscence works
+// best with the years someone was roughly 10 to 30, so this makes the choice visible.
+function ageLine(kind: keyof typeof KIND, year: number | null, person: string, birthYear: number) {
+  if (kind === "artist" || !year || !birthYear) return "";
+  const age = year - birthYear;
+  if (age < 0 || age > 110) return "";
+  return `${person} was ${age} when it ${kind === "movie" ? "came out" : "first aired"}`;
+}
+
+function Item({ name, kind, why, year, person, birthYear }: { name: string; kind: keyof typeof KIND; why: string; year: number | null; person: string; birthYear: number }) {
+  const age = ageLine(kind, year, person, birthYear);
   return (
     <div>
       <p className="text-xl font-semibold leading-snug text-stone-900">
-        {name} <span className="ml-1 align-middle text-sm font-normal text-stone-500">{KIND[kind]}</span>
+        {name} <span className="ml-1 align-middle text-sm font-normal text-stone-500">{KIND[kind]}{year && kind !== "artist" ? `, ${year}` : ""}</span>
       </p>
+      {age ? <p className="mt-0.5 text-sm text-stone-600">{age}</p> : null}
       {why ? <p className="mt-1 text-sm text-teal-900">Why this: {why}</p> : null}
     </div>
   );
+}
+
+// Search links only: no account, and nothing about the person goes into the URL.
+const youtube = (query: string) => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+const imageSearch = (query: string) => `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(query)}`;
+function Find({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center rounded-lg text-sm font-semibold text-teal-900 underline decoration-teal-800/30 underline-offset-4 hover:decoration-teal-800 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-teal-700 print:hidden">
+      {children}
+      <span className="sr-only"> (opens a search in a new tab)</span>
+    </a>
+  );
+}
+function clipQuery(entry: { item: string; type: keyof typeof KIND; year: number | null }) {
+  return entry.type === "artist" ? `${entry.item} songs` : `${entry.item}${entry.year ? ` ${entry.year}` : ""} ${entry.type === "movie" ? "film" : "TV show"} clip`;
 }
 
 const CHOICES: { value: Reaction; label: string; on: string }[] = [
@@ -85,16 +111,43 @@ function ReactionPicker({ item, person, value, onChange }: { item: string; perso
   );
 }
 
-function Songs({ songs }: { songs: string[] }) {
-  if (!songs.length) return <p className="text-base text-stone-700">Choose a familiar recording together.</p>;
+function Songs({ songs, artist }: { songs: string[]; artist: string }) {
+  if (!songs.length) {
+    return (
+      <div>
+        <p className="text-base text-stone-700">Choose a familiar recording together.</p>
+        <Find href={youtube(`${artist} songs`)}>Find {artist} on YouTube</Find>
+      </div>
+    );
+  }
   return (
     <div>
       <p className="text-sm font-semibold text-stone-700">Recordings to try</p>
-      <ul className="mt-1 space-y-0.5 text-base text-stone-900">
-        {songs.map((song) => <li key={song}>{song}</li>)}
+      <ul className="mt-1 space-y-1 text-base text-stone-900">
+        {songs.map((song) => (
+          <li key={song} className="flex flex-wrap items-baseline gap-x-3">
+            <span>{song}</span>
+            <Find href={youtube(`${song} ${artist}`)}>Play on YouTube</Find>
+          </li>
+        ))}
       </ul>
       <p className="mt-1 text-sm text-stone-500">Suggested by AI. Listen first to check it feels right.</p>
     </div>
+  );
+}
+
+// Shown on every plan and printed with it: what to do if the session stops feeling good.
+function CalmCard({ person, id }: { person: string; id: string }) {
+  return (
+    <aside aria-labelledby={id} className="mt-6 break-inside-avoid rounded-2xl border-l-4 border-amber-500 bg-amber-50/70 px-5 py-4">
+      <h3 id={id} className="text-base font-semibold text-amber-950">If {person} seems upset</h3>
+      <ul className="mt-2 space-y-1.5 text-base leading-relaxed text-stone-800">
+        <li>Pause. Speak slowly and keep your voice calm and low.</li>
+        <li>Name the feeling, not the facts: “That sounds hard. I’m right here.”</li>
+        <li>Don’t correct or test memory. Gently move on, or go straight to the closing song.</li>
+        <li>Ending early is fine. A few good minutes count. Afterwards, mark the item “Seemed uneasy” so the next plan leaves it out.</li>
+      </ul>
+    </aside>
   );
 }
 
@@ -107,16 +160,36 @@ type Props = {
   firstName: string;
   seeds: Seed[];
   sessionNumber: number;
+  birthYear: number;
   /** Present on the latest session only: hands the caregiver's feedback to the planning agent. */
   onPlanNext?: (feedback: Feedback[], note: string) => void;
   busy?: boolean;
+  /** Reactions and note saved earlier on this device, and where to report changes to them. */
+  draft?: Draft;
+  onDraftChange?: (draft: Draft) => void;
+  /** False when restoring a saved plan, so the page does not jump on load. */
+  scrollOnMount?: boolean;
 };
+export type Draft = { reactions: Record<string, Reaction>; note: string };
 
-export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onPlanNext, busy = false }: Props) {
+export default function SessionPlan({ plan, firstName, seeds, sessionNumber, birthYear, onPlanNext, busy = false, draft, onDraftChange, scrollOnMount = true }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
-  const [reactions, setReactions] = useState<Record<string, Reaction>>({});
-  const [note, setNote] = useState("");
+  const [reactions, setReactionsState] = useState<Record<string, Reaction>>(draft?.reactions ?? {});
+  const [note, setNoteState] = useState(draft?.note ?? "");
+  const setReaction = (entityId: string, next?: Reaction) => {
+    const copy = { ...reactions };
+    if (next) copy[entityId] = next; else delete copy[entityId];
+    setReactionsState(copy);
+    onDraftChange?.({ reactions: copy, note });
+  };
+  const setNote = (value: string) => {
+    setNoteState(value);
+    onDraftChange?.({ reactions, note: value });
+  };
+  // Only when a session first appears; a restored plan stays where the page is.
+  const scrollOnFirstShow = useRef(scrollOnMount);
   useEffect(() => {
+    if (!scrollOnFirstShow.current) return;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     heading.current?.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
     heading.current?.focus({ preventScroll: true });
@@ -131,11 +204,7 @@ export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onP
       item={entry.item}
       person={name}
       value={reactions[entry.entity_id]}
-      onChange={(next) => setReactions((current) => {
-        const copy = { ...current };
-        if (next) copy[entry.entity_id] = next; else delete copy[entry.entity_id];
-        return copy;
-      })}
+      onChange={(next) => setReaction(entry.entity_id, next)}
     />
   ) : null;
   const submit = () => onPlanNext?.(
@@ -151,11 +220,12 @@ export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onP
       </h2>
       {seeds.length ? <p className="mt-2 text-base text-stone-600">Built from their love of {joinNames(seeds.map((seed) => seed.name))}.</p> : null}
       <TimeBar />
+      <CalmCard person={name} id={`${headingId}-calm`} />
 
       <div className="mt-8 space-y-8">
         <Part tone={TONE.music} minutes="0–5 min" title="Opening song">
-          <Item name={plan.opening_song.item} kind={plan.opening_song.type} why={plan.opening_song.why_this} />
-          <Songs songs={plan.opening_song.songs} />
+          <Item name={plan.opening_song.item} kind={plan.opening_song.type} why={plan.opening_song.why_this} year={plan.opening_song.year} person={name} birthYear={birthYear} />
+          <Songs songs={plan.opening_song.songs} artist={plan.opening_song.item} />
           <Tip>{plan.opening_song.caregiver_tip}</Tip>
           {react(plan.opening_song)}
         </Part>
@@ -166,19 +236,20 @@ export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onP
           </p>
           {plan.conversation.map((topic) => (
             <div key={topic.entity_id} className="break-inside-avoid space-y-3 pt-2">
-              <Item name={topic.item} kind={topic.type} why={topic.why_this} />
+              <Item name={topic.item} kind={topic.type} why={topic.why_this} year={topic.year} person={name} birthYear={birthYear} />
               <ul aria-label={`Questions about ${topic.item}`} className="space-y-3">
                 {topic.prompts.map((prompt) => (
                   <li key={prompt} className="border-l-2 border-teal-800/30 pl-4 font-serif text-[1.3rem] leading-snug text-stone-900">{prompt}</li>
                 ))}
               </ul>
+              <Find href={youtube(clipQuery(topic))}>{topic.type === "artist" ? `Find ${topic.item} on YouTube` : "Find a short clip on YouTube"}</Find>
               {react(topic)}
             </div>
           ))}
         </Part>
 
         <Part tone={TONE.sensory} minutes="20–25 min" title="Sensory activity">
-          <Item name={plan.sensory_activity.item} kind={plan.sensory_activity.type} why={plan.sensory_activity.why_this} />
+          <Item name={plan.sensory_activity.item} kind={plan.sensory_activity.type} why={plan.sensory_activity.why_this} year={plan.sensory_activity.year} person={name} birthYear={birthYear} />
           <p className="text-lg leading-relaxed text-stone-900">{plan.sensory_activity.activity}</p>
           {plan.sensory_activity.materials.length ? (
             <div>
@@ -193,12 +264,13 @@ export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onP
               </ul>
             </div>
           ) : null}
+          {plan.sensory_activity.type !== "artist" ? <Find href={imageSearch(`${plan.sensory_activity.item}${plan.sensory_activity.year ? ` ${plan.sensory_activity.year}` : ""} ${plan.sensory_activity.type === "movie" ? "film" : "TV show"} stills`)}>Find photos to print</Find> : null}
           {react(plan.sensory_activity)}
         </Part>
 
         <Part tone={TONE.music} minutes="25–30 min" title="Closing song">
-          <Item name={plan.closing.item} kind={plan.closing.type} why={plan.closing.why_this} />
-          <Songs songs={plan.closing.songs} />
+          <Item name={plan.closing.item} kind={plan.closing.type} why={plan.closing.why_this} year={plan.closing.year} person={name} birthYear={birthYear} />
+          <Songs songs={plan.closing.songs} artist={plan.closing.item} />
           <Tip>{plan.closing.caregiver_tip}</Tip>
           {react(plan.closing)}
         </Part>
