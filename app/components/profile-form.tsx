@@ -4,9 +4,38 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { FavoriteType, Profile } from "@/lib/profile";
 import type { Expansion, Seed } from "@/lib/qloo-types";
 import QlooResults, { RecognizedFavorites } from "./qloo-results";
-import type { PlanResponse, ReviewResponse } from "@/lib/plan-schema";
+import type { PlanResponse, ReviewResponse, SessionPlan } from "@/lib/plan-schema";
+import type { AgentDecision, Feedback, ReplanResponse } from "@/lib/replan-schema";
 import PlanningResults from "./planning-results";
-import AgentProgress, { type AgentStage } from "./agent-progress";
+import AgentProgress, { joinNames, type AgentStage } from "./agent-progress";
+import AgentNote from "./agent-note";
+
+type FollowUp = { decision: AgentDecision; review: ReviewResponse; planned: PlanResponse };
+type NextRun = { stage: AgentStage; failed: boolean; error: string; decision: AgentDecision | null; result: Expansion | null; review: ReviewResponse | null };
+const IDLE_RUN: NextRun = { stage: "idle", failed: false, error: "", decision: null, result: null, review: null };
+
+async function post<T>(path: string, body: unknown, signal: AbortSignal): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body), signal,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data) throw new Error(data?.error ?? "The server could not complete this request. Please try again.");
+  return data as T;
+}
+
+// Planning sometimes needs one more pass; the reviewed pool stays valid, so no re-screening.
+async function generateWithRetry(receipt: string, signal: AbortSignal, onRetry: () => void): Promise<PlanResponse> {
+  try {
+    return await post<PlanResponse>("/api/plan", { action: "generate", receipt }, signal);
+  } catch (firstError) {
+    if (signal.aborted) throw firstError;
+    onRetry();
+    return post<PlanResponse>("/api/plan", { action: "generate", receipt }, signal);
+  }
+}
+
+const planIds = (plan: SessionPlan) => [plan.opening_song, ...plan.conversation, plan.sensory_activity, plan.closing].map((entry) => entry.entity_id);
 
 type FavoriteRow = { id: number; type: FavoriteType; name: string };
 
@@ -41,6 +70,10 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
   const [result, setResult] = useState<Expansion | null>(null);
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [planned, setPlanned] = useState<PlanResponse | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [nextRun, setNextRun] = useState<NextRun>(IDLE_RUN);
+  // The profile behind the latest session; the agent may add topics to avoid over time.
+  const sessionProfile = useRef<Profile | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
   useEffect(() => () => activeRequest.current?.abort(), []);
   const nextFavoriteId = useRef(3);
@@ -54,6 +87,9 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     setResult(null);
     setReview(null);
     setPlanned(null);
+    setFollowUps([]);
+    setNextRun(IDLE_RUN);
+    sessionProfile.current = null;
   }
 
   function fillExample() {
@@ -126,40 +162,25 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     const controller = new AbortController();
     activeRequest.current = controller;
     setBusy(true);
-    async function post<T>(path: string, body: unknown): Promise<T> {
-      const response = await fetch(path, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body), signal: controller.signal,
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data) throw new Error(data?.error ?? "The server could not complete this request. Please try again.");
-      return data as T;
-    }
+    const { signal } = controller;
     try {
       setStage("resolve");
       setProgress("Finding their favorites in Qloo’s taste graph…");
       // Only favorite names/types and birth year are needed for Qloo.
-      const resolved = await post<{ seeds: Seed[] }>("/api/resolve", { knownFavorites: profile.knownFavorites });
+      const resolved = await post<{ seeds: Seed[] }>("/api/resolve", { knownFavorites: profile.knownFavorites }, signal);
       setSeeds(resolved.seeds);
       setStage("expand");
       setProgress("Following their taste to films, TV and music. This usually takes 10 to 20 seconds.");
-      const expanded = await post<Expansion>("/api/expand", { birthYear: profile.birthYear, seeds: resolved.seeds });
+      const expanded = await post<Expansion>("/api/expand", { birthYear: profile.birthYear, seeds: resolved.seeds }, signal);
       setResult(expanded);
       setStage("review");
       setProgress("Checking topics to avoid…");
-      const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile, proof: expanded.proof });
+      const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile, proof: expanded.proof }, signal);
       setReview(screened);
       setStage("plan");
       setProgress(`Checked topics to avoid. Writing a 30-minute session…`);
-      let session: PlanResponse;
-      try {
-        session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
-      } catch (firstError) {
-        // The reviewed pool is still valid, so one more planning try costs no extra screening.
-        if (controller.signal.aborted) throw firstError;
-        setProgress("Writing a 30-minute session. Taking one more pass…");
-        session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
-      }
+      const session = await generateWithRetry(screened.receipt, signal, () => setProgress("Writing a 30-minute session. Taking one more pass…"));
+      sessionProfile.current = profile;
       setPlanned(session);
       setStage("done");
       setProgress("Your 30-minute session is ready.");
@@ -172,6 +193,43 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
     } finally {
       activeRequest.current = null;
       if (!controller.signal.aborted) setBusy(false);
+    }
+  }
+
+  // After a session: the caregiver's reactions go to the planning agent, which decides what
+  // the next Qloo search builds on. The result passes the same safety review and planning.
+  async function planNext(feedback: Feedback[], note: string) {
+    const profile = sessionProfile.current;
+    if (activeRequest.current || !profile || !planned) return;
+    const latestSeeds = followUps.at(-1)?.decision.seeds ?? seeds;
+    const shown = [...new Set([planned, ...followUps.map((item) => item.planned)].flatMap((item) => planIds(item.plan)))];
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const { signal } = controller;
+    setNextRun({ ...IDLE_RUN, stage: "resolve" });
+    setProgress("Reading how the last session went…");
+    try {
+      const replan = await post<ReplanResponse>("/api/replan", {
+        profile, note, feedback, shown_ids: shown,
+        seeds: latestSeeds.map(({ entity_id, name, type }) => ({ entity_id, name, type })),
+      }, signal);
+      setNextRun((run) => ({ ...run, stage: "review", decision: replan.decision, result: replan.expansion }));
+      setProgress("Checking topics to avoid…");
+      const screened = await post<ReviewResponse>("/api/plan", { action: "review", profile: replan.profile, proof: replan.expansion.proof }, signal);
+      setNextRun((run) => ({ ...run, stage: "plan", review: screened }));
+      setProgress("Writing the next session…");
+      const session = await generateWithRetry(screened.receipt, signal, () => setProgress("Writing the next session. Taking one more pass…"));
+      sessionProfile.current = replan.profile;
+      setFollowUps((items) => [...items, { decision: replan.decision, review: screened, planned: session }]);
+      setNextRun(IDLE_RUN);
+      setProgress("The next session is ready.");
+    } catch (error) {
+      if (!signal.aborted) {
+        setNextRun((run) => ({ ...run, failed: true, error: error instanceof Error ? error.message : "The next session could not be planned. Please try again." }));
+        setProgress("");
+      }
+    } finally {
+      activeRequest.current = null;
     }
   }
 
@@ -397,7 +455,43 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
           </button>
         </div>
       </form>
-      <PlanningResults review={review} planned={planned} firstName={firstName.trim()} seeds={seeds} />
+      <PlanningResults
+        review={review}
+        planned={planned}
+        firstName={firstName.trim()}
+        seeds={seeds}
+        sessionNumber={1}
+        onPlanNext={followUps.length ? undefined : planNext}
+        busy={nextRun.stage !== "idle" && !nextRun.failed}
+      />
+      {followUps.map((item, index) => (
+        <div key={index} className="mt-10 space-y-6 border-t-2 border-teal-900/10 pt-10">
+          <AgentNote decision={item.decision} sessionNumber={index + 2} />
+          <PlanningResults
+            review={item.review}
+            planned={item.planned}
+            firstName={firstName.trim()}
+            seeds={item.decision.seeds}
+            sessionNumber={index + 2}
+            onPlanNext={index === followUps.length - 1 ? planNext : undefined}
+            busy={nextRun.stage !== "idle" && !nextRun.failed}
+          />
+        </div>
+      ))}
+      {nextRun.stage !== "idle" ? (
+        <div className="mt-8 print:hidden">
+          <AgentProgress
+            mode="next"
+            stage={nextRun.stage}
+            failed={nextRun.failed}
+            seeds={[]}
+            result={nextRun.result}
+            review={nextRun.review}
+            decisionSummary={nextRun.decision ? `Now building on ${joinNames(nextRun.decision.seeds.map((seed) => seed.name))}.` : ""}
+          />
+          {nextRun.error ? <p role="alert" className="rounded-xl bg-rose-50 p-4 text-rose-900">{nextRun.error} Your notes are kept; press the button again to retry.</p> : null}
+        </div>
+      ) : null}
       {result ? (
         <details className="mt-6 print:hidden">
           <summary className="min-h-11 cursor-pointer py-2 font-semibold text-teal-900">Everything Qloo found</summary>

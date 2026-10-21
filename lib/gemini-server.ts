@@ -8,6 +8,8 @@ import { generatedPlanSchema, planRequirements, validatePlan, validateVerdicts, 
 import type { Profile } from "./profile";
 import type { QlooItem } from "./qloo-types";
 import { simplifyModelSchema } from "./model-schema";
+import { REPLAN_PROMPT, REPLAN_CONTRACT } from "./replanPrompt";
+import { agentDecisionSchema, applyDecision, ruleDecision, replanRequestSchema, type AgentDecision } from "./replan-schema";
 
 export const GEMINI_MODEL = "gemini-3.5-flash-lite";
 // The session plan is the part people read, so its model can be switched without a
@@ -90,4 +92,26 @@ export async function generatePlan(items: ReviewedItem[], profile: Profile): Pro
   }, generatedPlanSchema, (data, lastAttempt) => { plan = validatePlan(data, approved, topics, { fallback: lastAttempt }); return data; }, Date.now() + 52_000);
   if (!plan) throw new PlanningError("Unable to create a valid plan.");
   return plan;
+}
+
+/**
+ * The agent step between sessions: reads how each item landed and decides which taste
+ * signals guide the next Qloo search. Falls back to plain rules if the model is unavailable,
+ * so the caregiver always gets a next session.
+ */
+export async function decideNextSession(request: z.infer<typeof replanRequestSchema>, profile: Profile): Promise<AgentDecision> {
+  const existing = [...profile.topicsToAvoid, profile.otherTopicsToAvoid].filter(Boolean);
+  try {
+    let decision = null as AgentDecision | null;
+    await structured("replan", GEMINI_MODEL, `${REPLAN_PROMPT}\n\n${REPLAN_CONTRACT}`, {
+      profile: { first_name: profile.firstName, birth_year: profile.birthYear, topics_to_avoid: existing },
+      original_favorites: request.seeds,
+      feedback: request.feedback,
+      caregiver_note: request.note,
+    }, agentDecisionSchema, (data) => { decision = applyDecision(request, data, existing); return data; }, Date.now() + 20_000);
+    if (decision) return decision;
+  } catch (error) {
+    console.error("Replan decision fell back to rules", { reason: error instanceof PlanningError ? error.status : "unexpected" });
+  }
+  return ruleDecision(request, profile.firstName);
 }

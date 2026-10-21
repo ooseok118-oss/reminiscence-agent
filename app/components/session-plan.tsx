@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SessionPlan as Plan } from "@/lib/plan-schema";
 import type { Seed } from "@/lib/qloo-types";
+import type { Feedback, Reaction } from "@/lib/replan-schema";
 import { joinNames } from "./agent-progress";
 
 const KIND = { artist: "Music", movie: "Film", tv_show: "TV show" };
@@ -57,6 +58,33 @@ function Item({ name, kind, why }: { name: string; kind: keyof typeof KIND; why:
   );
 }
 
+const CHOICES: { value: Reaction; label: string; on: string }[] = [
+  { value: "enjoyed", label: "Enjoyed it", on: "border-teal-800 bg-teal-800 text-white" },
+  { value: "neutral", label: "Neutral", on: "border-stone-600 bg-stone-600 text-white" },
+  { value: "uneasy", label: "Seemed uneasy", on: "border-amber-600 bg-amber-100 text-amber-950" },
+];
+
+// After the session, the caregiver marks how each item landed. Pressing a chosen
+// button again clears it.
+function ReactionPicker({ item, person, value, onChange }: { item: string; person: string; value?: Reaction; onChange: (next?: Reaction) => void }) {
+  return (
+    <div role="group" aria-label={`How did ${person} respond to ${item}?`} className="flex flex-wrap items-center gap-2 print:hidden">
+      <span className="mr-1 text-sm text-stone-500">How did it go?</span>
+      {CHOICES.map((choice) => (
+        <button
+          key={choice.value}
+          type="button"
+          aria-pressed={value === choice.value}
+          onClick={() => onChange(value === choice.value ? undefined : choice.value)}
+          className={`min-h-10 rounded-full border px-3.5 py-1.5 text-sm font-medium focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-teal-700 ${value === choice.value ? choice.on : "border-stone-300 text-stone-700 hover:bg-stone-50"}`}
+        >
+          {choice.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Songs({ songs }: { songs: string[] }) {
   if (!songs.length) return <p className="text-base text-stone-700">Choose a familiar recording together.</p>;
   return (
@@ -74,8 +102,20 @@ function Tip({ children }: { children: ReactNode }) {
   return <p className="rounded-xl bg-stone-100 px-4 py-3 text-base leading-relaxed text-stone-800"><span className="font-semibold">Tip: </span>{children}</p>;
 }
 
-export default function SessionPlan({ plan, firstName, seeds }: { plan: Plan; firstName: string; seeds: Seed[] }) {
+type Props = {
+  plan: Plan;
+  firstName: string;
+  seeds: Seed[];
+  sessionNumber: number;
+  /** Present on the latest session only: hands the caregiver's feedback to the planning agent. */
+  onPlanNext?: (feedback: Feedback[], note: string) => void;
+  busy?: boolean;
+};
+
+export default function SessionPlan({ plan, firstName, seeds, sessionNumber, onPlanNext, busy = false }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const [reactions, setReactions] = useState<Record<string, Reaction>>({});
+  const [note, setNote] = useState("");
   useEffect(() => {
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     heading.current?.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
@@ -83,11 +123,31 @@ export default function SessionPlan({ plan, firstName, seeds }: { plan: Plan; fi
   }, []);
   const name = firstName || "them";
   const topicMinutes = Math.round(15 / Math.max(1, plan.conversation.length));
+  const entries = [plan.opening_song, ...plan.conversation, plan.sensory_activity, plan.closing];
+  const items = [...new Map(entries.map((entry) => [entry.entity_id, entry])).values()];
+  const marked = items.filter((entry) => reactions[entry.entity_id]).length;
+  const react = (entry: { entity_id: string; item: string }) => onPlanNext ? (
+    <ReactionPicker
+      item={entry.item}
+      person={name}
+      value={reactions[entry.entity_id]}
+      onChange={(next) => setReactions((current) => {
+        const copy = { ...current };
+        if (next) copy[entry.entity_id] = next; else delete copy[entry.entity_id];
+        return copy;
+      })}
+    />
+  ) : null;
+  const submit = () => onPlanNext?.(
+    items.filter((entry) => reactions[entry.entity_id]).map((entry) => ({ entity_id: entry.entity_id, name: entry.item, type: entry.type, reaction: reactions[entry.entity_id] })),
+    note.trim(),
+  );
+  const headingId = `session-heading-${sessionNumber}`;
 
   return (
-    <article aria-labelledby="session-heading" className="border-t border-stone-200 bg-white pt-8 sm:rounded-3xl sm:border sm:border-teal-900/15 sm:p-8 print:border-0 print:p-0">
-      <h2 id="session-heading" ref={heading} tabIndex={-1} className="scroll-mt-6 text-3xl font-semibold tracking-tight text-stone-900 focus:outline-none">
-        A 30-minute session for {name}
+    <article aria-labelledby={headingId} className="border-t border-stone-200 bg-white pt-8 sm:rounded-3xl sm:border sm:border-teal-900/15 sm:p-8 print:border-0 print:p-0">
+      <h2 id={headingId} ref={heading} tabIndex={-1} className="scroll-mt-6 text-3xl font-semibold tracking-tight text-stone-900 focus:outline-none">
+        {sessionNumber === 1 ? `A 30-minute session for ${name}` : `Session ${sessionNumber} for ${name}`}
       </h2>
       {seeds.length ? <p className="mt-2 text-base text-stone-600">Built from their love of {joinNames(seeds.map((seed) => seed.name))}.</p> : null}
       <TimeBar />
@@ -97,6 +157,7 @@ export default function SessionPlan({ plan, firstName, seeds }: { plan: Plan; fi
           <Item name={plan.opening_song.item} kind={plan.opening_song.type} why={plan.opening_song.why_this} />
           <Songs songs={plan.opening_song.songs} />
           <Tip>{plan.opening_song.caregiver_tip}</Tip>
+          {react(plan.opening_song)}
         </Part>
 
         <Part tone={TONE.conversation} minutes="5–20 min" title="Conversation">
@@ -104,13 +165,14 @@ export default function SessionPlan({ plan, firstName, seeds }: { plan: Plan; fi
             About {topicMinutes} minutes for each. Read a question aloud, then follow where {name} takes it. There are no wrong answers.
           </p>
           {plan.conversation.map((topic) => (
-            <div key={topic.item} className="break-inside-avoid space-y-3 pt-2">
+            <div key={topic.entity_id} className="break-inside-avoid space-y-3 pt-2">
               <Item name={topic.item} kind={topic.type} why={topic.why_this} />
               <ul aria-label={`Questions about ${topic.item}`} className="space-y-3">
                 {topic.prompts.map((prompt) => (
                   <li key={prompt} className="border-l-2 border-teal-800/30 pl-4 font-serif text-[1.3rem] leading-snug text-stone-900">{prompt}</li>
                 ))}
               </ul>
+              {react(topic)}
             </div>
           ))}
         </Part>
@@ -131,20 +193,52 @@ export default function SessionPlan({ plan, firstName, seeds }: { plan: Plan; fi
               </ul>
             </div>
           ) : null}
+          {react(plan.sensory_activity)}
         </Part>
 
         <Part tone={TONE.music} minutes="25–30 min" title="Closing song">
           <Item name={plan.closing.item} kind={plan.closing.type} why={plan.closing.why_this} />
           <Songs songs={plan.closing.songs} />
           <Tip>{plan.closing.caregiver_tip}</Tip>
+          {react(plan.closing)}
         </Part>
       </div>
+
+      {onPlanNext ? (
+        <section aria-labelledby={`${headingId}-after`} className="mt-8 rounded-2xl bg-teal-50/70 p-5 sm:p-6 print:hidden">
+          <h3 id={`${headingId}-after`} className="text-lg font-semibold text-teal-950">After the session</h3>
+          <p className="mt-1 text-base leading-relaxed text-teal-950/80">
+            Mark how each item went above. The agent uses it to choose what the next session builds on, and what to leave out.
+          </p>
+          <label htmlFor={`${headingId}-note`} className="mt-4 block font-medium text-stone-800">Anything you noticed? <span className="font-normal text-stone-500">(optional)</span></label>
+          <textarea
+            id={`${headingId}-note`}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={300}
+            rows={2}
+            placeholder={`e.g., ${name} hummed along to the trumpet`}
+            className="mt-2 min-h-20 w-full resize-y rounded-xl border border-stone-300 bg-white px-4 py-3 text-base text-stone-900 placeholder:text-stone-400 focus:border-teal-700 focus:outline-none focus:ring-3 focus:ring-teal-700/15"
+          />
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              disabled={!marked || busy}
+              onClick={submit}
+              className="min-h-12 rounded-xl bg-teal-800 px-5 py-3 text-base font-semibold text-white hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700 disabled:cursor-not-allowed"
+            >
+              {busy ? "Planning the next session…" : "Plan the next session"}
+            </button>
+            <p className="text-sm text-stone-600" aria-live="polite">{marked ? `${marked} of ${items.length} marked` : "Mark at least one item to continue."}</p>
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-8 flex flex-wrap items-center gap-4 border-t border-stone-200 pt-6">
         <button
           type="button"
           onClick={() => window.print()}
-          className="min-h-12 rounded-xl bg-teal-800 px-5 py-3 text-base font-semibold text-white hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700 print:hidden"
+          className="min-h-12 rounded-xl border border-teal-800/30 px-5 py-3 text-base font-semibold text-teal-900 hover:bg-teal-50 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700 print:hidden"
         >
           Print this plan
         </button>

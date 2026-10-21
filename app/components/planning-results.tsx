@@ -1,10 +1,19 @@
 import type { PlanResponse, ReviewResponse } from "@/lib/plan-schema";
 import type { Seed } from "@/lib/qloo-types";
+import type { Feedback } from "@/lib/replan-schema";
 import SessionPlan from "./session-plan";
 
-type Props = { review: ReviewResponse | null; planned: PlanResponse | null; firstName: string; seeds: Seed[] };
+type Props = {
+  review: ReviewResponse | null;
+  planned: PlanResponse | null;
+  firstName: string;
+  seeds: Seed[];
+  sessionNumber?: number;
+  onPlanNext?: (feedback: Feedback[], note: string) => void;
+  busy?: boolean;
+};
 
-export default function PlanningResults({ review, planned, firstName, seeds }: Props) {
+export default function PlanningResults({ review, planned, firstName, seeds, sessionNumber = 1, onPlanNext, busy }: Props) {
   if (!review) return null;
   const { counts, items, warnings } = review.review;
   const setAside = items.filter((item) => item.verdict === "exclude");
@@ -13,10 +22,10 @@ export default function PlanningResults({ review, planned, firstName, seeds }: P
 
   return (
     <div className="mt-8 space-y-6">
-      {planned ? <SessionPlan plan={planned.plan} firstName={firstName} seeds={seeds} /> : null}
+      {planned ? <SessionPlan plan={planned.plan} firstName={firstName} seeds={seeds} sessionNumber={sessionNumber} onPlanNext={onPlanNext} busy={busy} /> : null}
 
-      <section aria-labelledby="safety-heading" className="rounded-2xl border border-stone-200 p-5 sm:p-6 print:hidden">
-        <h2 id="safety-heading" className="text-lg font-semibold text-stone-900">How the safety check went</h2>
+      <section aria-labelledby={`safety-heading-${sessionNumber}`} className="rounded-2xl border border-stone-200 p-5 sm:p-6 print:hidden">
+        <h2 id={`safety-heading-${sessionNumber}`} className="text-lg font-semibold text-stone-900">{sessionNumber === 1 ? "How the safety check went" : `How the safety check went for session ${sessionNumber}`}</h2>
         <p className="mt-2 text-base leading-relaxed text-stone-700">
           {counts.exclude ? `Set aside ${counts.exclude} of ${items.length} suggestions for ${name}.` : `None of the ${items.length} suggestions needed to be set aside.`}
           {counts.caution ? ` ${counts.caution} stayed in with limits on what to talk about.` : ""}

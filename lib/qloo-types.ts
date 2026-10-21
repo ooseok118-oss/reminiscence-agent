@@ -36,5 +36,7 @@ export type Expansion = {
   seeds: Seed[];
   era: { from: number; to: number };
   categories: CategoryResult[];
+  /** Entity IDs kept out of this search and any refill of it. */
+  exclude?: string[];
   safety_reviewed: false;
 };

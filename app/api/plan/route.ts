@@ -35,7 +35,7 @@ export async function POST(request: Request) {
         const lowCategories = expansion.categories.filter((category) => reviewed.filter((item) => item.type === category.type && item.verdict !== "exclude").length < 3);
         if (!lowCategories.length || deadline - Date.now() < 12_000 || reviewed.length >= 72) break;
         const { seeds } = expansionInput({ birthYear: profile.birthYear, seeds: expansion.seeds });
-        const refilled = await Promise.all(lowCategories.map((category) => expandCategory(category.type, seeds, expansion.era.from - (widen ? 5 : 0), expansion.era.to + (widen ? 5 : 0), true, deadline - 8000)));
+        const refilled = await Promise.all(lowCategories.map((category) => expandCategory(category.type, seeds, expansion.era.from - (widen ? 5 : 0), expansion.era.to + (widen ? 5 : 0), true, deadline - 8000, expansion.exclude ?? [])));
         const additions = [...new Map(refilled.flatMap((category) => category.items).filter((item) => !reviewed.some((old) => old.entity_id === item.entity_id)).map((item) => [item.entity_id, item])).values()].slice(0, 72 - reviewed.length);
         if (additions.length && deadline - Date.now() > 2000) {
           try { reviewed = [...reviewed, ...await reviewItems(additions, profile, deadline)]; }

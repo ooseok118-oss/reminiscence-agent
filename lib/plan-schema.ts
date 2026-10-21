@@ -14,7 +14,7 @@ export const itemSchema = z.object({
   entity_id: uuid, name: text(240), type,
   release_year: z.number().int().nullable(), start_year: z.number().int().nullable(), end_year: z.number().int().nullable(),
   description: z.string().max(600), popularity: z.number().min(0).max(1).nullable(),
-  because_of: z.array(z.object({ entity_id: uuid, name: text(240), score: z.number().min(0).max(1) })).max(3),
+  because_of: z.array(z.object({ entity_id: uuid, name: text(240), score: z.number().min(0).max(1) })).max(4),
   why_this: z.string().max(800).nullable(),
 });
 export const verdictSchema = z.object({
@@ -40,7 +40,7 @@ export const generatedPlanSchema = z.object({
 });
 export type GeneratedPlan = z.infer<typeof generatedPlanSchema>;
 
-type PlanEntry = { item: string; type: ItemType; why_this: string };
+type PlanEntry = { entity_id: string; item: string; type: ItemType; why_this: string };
 export type SessionPlan = {
   opening_song: PlanEntry & { songs: string[]; caregiver_tip: string };
   conversation: (PlanEntry & { prompts: string[] })[];
@@ -185,7 +185,7 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
     }
     return item;
   };
-  const describe = (item: ReviewedItem): PlanEntry => ({ item: item.name, type: item.type, why_this: item.why_this ?? "" });
+  const describe = (item: ReviewedItem): PlanEntry => ({ entity_id: item.entity_id, item: item.name, type: item.type, why_this: item.why_this ?? "" });
   const instruction = (line: string, backup: string) => {
     const problem = lineProblem(line, topics);
     if (!problem) return line;

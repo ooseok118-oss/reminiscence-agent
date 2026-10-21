@@ -56,7 +56,7 @@ test("a valid plan keeps Qloo attribution, item types and the new fields", () =>
   assert.equal(result.conversation.length, 3);
   assert.equal(result.conversation[0].why_this, westSide.why_this);
   assert.deepEqual(result.sensory_activity.materials, ["Printed photos", "A hat"]);
-  assert.equal("entity_id" in result.opening_song, false);
+  assert.equal(result.opening_song.entity_id, sinatra.entity_id);   // kept so feedback can refer to it
   assert.equal("safe_angle" in result.conversation[0], false);
 });
 

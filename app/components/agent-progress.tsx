@@ -25,27 +25,34 @@ type Props = {
   seeds: Seed[];
   result: Expansion | null;
   review: ReviewResponse | null;
+  /** "next" describes planning a follow-up session from the caregiver's feedback. */
+  mode?: "first" | "next";
+  /** For follow-ups: what the agent decided, shown under the first step. */
+  decisionSummary?: string;
 };
 
-export default function AgentProgress({ stage, failed, seeds, result, review }: Props) {
+export default function AgentProgress({ stage, failed, seeds, result, review, mode = "first", decisionSummary = "" }: Props) {
   if (stage === "idle") return null;
   const current = stage === "done" ? ORDER.length : ORDER.indexOf(stage);
   const connections = result ? result.categories.reduce((total, category) => total + category.items.length, 0) : 0;
+  const next = mode === "next";
   const steps = [
+    next
+      ? { title: "Reading how the last session went", detail: decisionSummary }
+      : {
+        title: "Finding their favorites in Qloo’s taste graph",
+        detail: seeds.length ? `Matched ${joinNames(seeds.map((seed) => `${seed.name} (${seed.release_year ? `${seed.release_year} ` : ""}${KIND[seed.type]})`))}.` : "",
+      },
     {
-      title: "Finding their favorites in Qloo’s taste graph",
-      detail: seeds.length ? `Matched ${joinNames(seeds.map((seed) => `${seed.name} (${seed.release_year ? `${seed.release_year} ` : ""}${KIND[seed.type]})`))}.` : "",
-    },
-    {
-      title: "Following their taste to films, TV and music",
-      detail: result ? `${connections} connections from ${result.era.from} to ${result.era.to}, the years they were 10 to 30.` : "",
+      title: next ? "Searching Qloo again from what worked" : "Following their taste to films, TV and music",
+      detail: result ? `${connections} ${next ? "new " : ""}connections from ${result.era.from} to ${result.era.to}, the years they were 10 to 30.` : "",
     },
     { title: "Checking topics to avoid", detail: review ? setAsideSummary(review) : "" },
-    { title: "Writing a 30-minute session", detail: stage === "done" ? "Ready below." : "" },
+    { title: next ? "Writing the next session" : "Writing a 30-minute session", detail: stage === "done" ? "Ready below." : "" },
   ];
 
   return (
-    <ol aria-label="Session building progress" className="mb-5 space-y-1 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 sm:p-5">
+    <ol aria-label={next ? "Next session progress" : "Session building progress"} className="mb-5 space-y-1 rounded-2xl border border-stone-200 bg-stone-50/70 p-4 sm:p-5">
       {steps.map((step, index) => {
         const done = index < current;
         const active = index === current && stage !== "done";

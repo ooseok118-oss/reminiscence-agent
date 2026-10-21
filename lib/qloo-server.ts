@@ -51,7 +51,7 @@ export function expansionInput(body: Record<string, unknown>): { birthYear: numb
   if (!Number.isInteger(body.birthYear) || Number(body.birthYear) < 1900 || Number(body.birthYear) > new Date().getFullYear()) {
     throw new QlooError("Enter a valid birth year.", 400);
   }
-  if (!Array.isArray(body.seeds) || body.seeds.length < 1 || body.seeds.length > 3) throw new QlooError("Resolve 1–3 favorites first.", 400);
+  if (!Array.isArray(body.seeds) || body.seeds.length < 1 || body.seeds.length > 4) throw new QlooError("Resolve 1–3 favorites first.", 400);
   const seeds = body.seeds.map((raw) => {
     const item = record(raw);
     if (typeof item.entity_id !== "string" || !UUID.test(item.entity_id)
@@ -98,7 +98,9 @@ export async function resolveFavorite(favorite: KnownFavorite): Promise<Seed> {
   return seed;
 }
 
-export async function expandCategory(type: FavoriteType, seeds: Seed[], from: number, to: number, relax = false, deadlineAt?: number): Promise<CategoryResult> {
+// `exclude` keeps items out of the results: things already used, or that seemed to upset the person.
+export async function expandCategory(type: FavoriteType, seeds: Seed[], from: number, to: number, relax = false, deadlineAt?: number, exclude: string[] = []): Promise<CategoryResult> {
+  const excluded = new Set(exclude.map((id) => id.toUpperCase()));
   const result: CategoryResult = { type, items: [], filters: { from, to, popularity: type === "movie" ? (relax ? 0.5 : 0.8) : type === "tv_show" ? (relax ? 0.2 : 0.5) : null }, attempts: 0, warnings: [], error: null };
   const deadline = Math.min(Date.now() + 52_000, deadlineAt ?? Infinity);
   let artistEntities: unknown[] | null = null;
@@ -115,6 +117,7 @@ export async function expandCategory(type: FavoriteType, seeds: Seed[], from: nu
       if (artistEntities) entities = artistEntities;
       else {
         const params = new URLSearchParams({ "filter.type": `urn:entity:${type}`, "signal.interests.entities": seeds.map((seed) => seed.entity_id).join(","), take: "12", "feature.explainability": "true" });
+        if (excluded.size) params.set("filter.exclude.entities", [...excluded].join(","));
         if (type !== "artist") {
           params.set("filter.release_year.min", String(result.filters.from));
           params.set("filter.release_year.max", String(result.filters.to));
@@ -129,7 +132,10 @@ export async function expandCategory(type: FavoriteType, seeds: Seed[], from: nu
         queryWarning = Boolean(record(record(data.query).explainability).warning || record(record(results.query).explainability).warning);
         if (type === "artist") artistEntities = entities;
       }
-      const items = entities.map((raw) => normalizeItem(raw, type, seeds, queryWarning)).filter((item) => item !== null);
+      // Excluded IDs are also filtered here, in case the API returns them anyway.
+      const items = entities.map((raw) => normalizeItem(raw, type, seeds, queryWarning))
+        .filter((item) => item !== null)
+        .filter((item) => !excluded.has(item.entity_id.toUpperCase()) && !seeds.some((seed) => seed.entity_id.toUpperCase() === item.entity_id.toUpperCase()));
       const filtered = items.filter((item) => type === "artist"
         ? overlapsEra(item.start_year, item.end_year, result.filters.from, result.filters.to)
         : item.release_year !== null && item.release_year >= result.filters.from && item.release_year <= result.filters.to
