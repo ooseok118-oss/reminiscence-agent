@@ -51,7 +51,8 @@ test("explanations preserve source identity and raw scores, with no invented sco
   assert.equal(explanation([{ ...seeds[1], score: 0.35 }, { ...seeds[0], score: 0.33 }, { ...third, score: 0.32 }]), "Inspired most by Elvis Presley and Roman Holiday");
   assert.equal(explanation([{ ...seeds[1], score: 0.55 }, { ...seeds[0], score: 0.25 }, { ...third, score: 0.2 }]), "Mostly inspired by Elvis Presley");
   const learned = { entity_id: "D", name: "Louis Armstrong", score: 0.24, origin: "session" };
-  assert.equal(explanation([{ ...seeds[1], score: 0.26 }, learned, { ...seeds[0], score: 0.25 }, { ...third, score: 0.25 }]), "Because they enjoyed Louis Armstrong in an earlier session");
+  assert.equal(explanation([{ ...learned, score: 0.27 }, { ...seeds[1], score: 0.26 }, { ...seeds[0], score: 0.24 }, { ...third, score: 0.23 }]), "Because they enjoyed Louis Armstrong in an earlier session");
+  assert.equal(explanation([{ ...seeds[1], score: 0.27 }, learned, { ...seeds[0], score: 0.25 }, { ...third, score: 0.24 }]), "Inspired most by Elvis Presley and Roman Holiday");
   assert.equal(explanation([{ ...seeds[1], score: 0.6 }, { ...learned, score: 0.2 }, { ...seeds[0], score: 0.2 }]), "Mostly inspired by Elvis Presley");
   assert.equal(explanation([{ ...seeds[0], score: 1 }]), "People who love Roman Holiday often love this too");
 });

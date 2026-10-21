@@ -174,18 +174,22 @@ export type Draft = { reactions: Record<string, Reaction>; note: string };
 
 export default function SessionPlan({ plan, firstName, seeds, sessionNumber, birthYear, onPlanNext, busy = false, draft, onDraftChange, scrollOnMount = true }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
-  const [reactions, setReactionsState] = useState<Record<string, Reaction>>(draft?.reactions ?? {});
-  const [note, setNoteState] = useState(draft?.note ?? "");
-  const setReaction = (entityId: string, next?: Reaction) => {
-    const copy = { ...reactions };
+  const [reactions, setReactions] = useState<Record<string, Reaction>>(draft?.reactions ?? {});
+  const [note, setNote] = useState(draft?.note ?? "");
+  // Functional updates, so quick taps in a row never overwrite each other.
+  const setReaction = (entityId: string, next?: Reaction) => setReactions((current) => {
+    const copy = { ...current };
     if (next) copy[entityId] = next; else delete copy[entityId];
-    setReactionsState(copy);
-    onDraftChange?.({ reactions: copy, note });
-  };
-  const setNote = (value: string) => {
-    setNoteState(value);
-    onDraftChange?.({ reactions, note: value });
-  };
+    return copy;
+  });
+  // Report every change for saving after it lands, never from inside a state update.
+  const reportDraft = useRef(onDraftChange);
+  useEffect(() => { reportDraft.current = onDraftChange; });
+  const firstDraft = useRef(true);
+  useEffect(() => {
+    if (firstDraft.current) { firstDraft.current = false; return; }
+    reportDraft.current?.({ reactions, note });
+  }, [reactions, note]);
   // Only when a session first appears; a restored plan stays where the page is.
   const scrollOnFirstShow = useRef(scrollOnMount);
   useEffect(() => {

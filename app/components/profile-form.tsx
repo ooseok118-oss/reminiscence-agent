@@ -325,7 +325,7 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
         <div role="status" className="mt-6 rounded-2xl border border-teal-800/20 bg-teal-50 p-4 sm:p-5 print:hidden">
           <p className="font-semibold text-teal-950">Welcome back. Your plan for {firstName || "them"} is saved on this device.</p>
           <p className="mt-1 text-sm leading-relaxed text-teal-950/80">
-            Saved {new Date(restoredAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. After the session, mark how each item went at the end of the plan to get the next one.
+            Saved {new Date(restoredAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}. After the session, mark how each item went at the end of the plan to get the next one.
           </p>
           <div className="mt-3 flex flex-wrap gap-3">
             <a href={`#session-heading-${followUps.length + 1}`} className="inline-flex min-h-11 items-center rounded-xl bg-teal-800 px-4 py-2 text-base font-semibold text-white hover:bg-teal-900 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-teal-700">Go to the latest plan</a>

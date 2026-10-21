@@ -39,10 +39,9 @@ export function overlapsEra(start: number | null, end: number | null, from: numb
 export function explanation(contributions: Contribution[]): string | null {
   if (!contributions.length) return null;
   const [first, second, ...rest] = [...contributions].sort((a, b) => b.score - a.score);
-  // Something they enjoyed in an earlier session, pulling about as hard as anything else:
-  // the clearest sign the plan learned from them, so it is named first.
-  const learned = contributions.find((item) => item.origin === "session" && item.score >= first.score * 0.9);
-  if (learned) return `Because they enjoyed ${learned.name} in an earlier session`;
+  // The strongest signal is something they enjoyed in an earlier session: the clearest
+  // sign the plan learned from them. Only claimed when it really leads.
+  if (first.origin === "session") return `Because they enjoyed ${first.name} in an earlier session`;
   // One favorite: say what the taste graph found, not just the source.
   if (!second) return `People who love ${first.name} often love this too`;
   // One favorite "leads" when it clearly outweighs the next (0.58 vs 0.42 with two favorites).
