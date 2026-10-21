@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Reminiscence Agent",
   description:
-    "Warm conversation starters for caregivers and families, inspired by familiar favorites.",
+    "Turn one favorite song into a 30-minute reminiscence session for someone living with dementia.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
