@@ -1,8 +1,8 @@
 # 1단계: 프로젝트 실행 → GitHub 공개 저장소 → Vercel 배포
 
-이 압축파일에는 코드 전체가 들어 있습니다. 먼저 압축을 풀고 `reminiscence-agent` 폴더를 VS Code에서 여세요. 이 폴더 바로 아래에 package.json과 app 폴더가 보여야 합니다.
+전체 코드는 https://github.com/ooseok118-oss/reminiscence-agent 에 있습니다. 저장소의 Code → Download ZIP으로 내려받아 압축을 풀고, package.json과 app 폴더가 보이는 프로젝트 폴더를 VS Code에서 여세요. GitHub 저장소 공개는 완료됐으므로 아래 3절은 새 저장소를 직접 만들 때만 참고하면 됩니다.
 
-현재 완료된 범위는 영어 안내 화면과 Next.js 프로젝트 구성입니다. 프로필 폼은 2단계에서 만듭니다. GitHub 공개 저장소는 생성됐으며 코드를 업로드하는 중입니다. Vercel 배포는 아직 수행되지 않았습니다.
+현재 완료된 범위는 영어 안내 화면과 Next.js 프로젝트 구성입니다. 프로필 폼은 2단계에서 만듭니다. GitHub 공개 저장소에 전체 코드를 업로드했습니다. Vercel 배포는 권한 설정을 확인한 뒤 진행해야 합니다.
 
 ## 1. 컴퓨터에서 실행
 
@@ -196,6 +196,7 @@ npm run start
 ## 이 작업에서의 검증 상태
 
 - 의존성 설치, ESLint, TypeScript 검사는 통과했습니다.
+- 빌드 결과를 production 서버로 실행해 HTTP 200, 영어 제목, 첫 화면, 면책 문구를 확인했습니다.
 - 일반 빌드는 이 실행환경의 Node.js 메모리 계측 오류(uv_resident_set_memory)로 중단됐습니다. 검증용으로 선택적 메모리 추적만 끄고 다시 빌드했을 때 컴파일·타입 검사·정적 페이지 생성이 모두 통과했습니다. 이 환경 전용 조정은 앱 소스에 포함하지 않았습니다. Vercel에서도 일반 npm run build를 확인해야 합니다.
 - Vercel 프로젝트 생성 요청은 연결된 계정의 팀 접근 권한 부족(403)으로 거절됐습니다. Vercel 플러그인 재인증 시 본인 Hobby 워크스페이스 ooseok118-6341에 대한 접근 권한을 허용한 후 재시도해야 합니다.
 - 공개 저장소: https://github.com/ooseok118-oss/reminiscence-agent
