@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateVerdicts, validatePlan, planRequirements, generatedPlanSchema, profileSchema } from "../lib/plan-schema.ts";
+import { validateVerdicts, validatePlan, planRequirements, leadWithItem, generatedPlanSchema, profileSchema } from "../lib/plan-schema.ts";
 import { simplifyModelSchema } from "../lib/model-schema.ts";
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -121,13 +121,12 @@ test("read-aloud text rejects quizzes, long prompts and avoided topics, includin
   assert.throws(() => validatePlan(bad, items, []), /quiz/);
 });
 
-test("the first question must name its item, allowing a dropped leading The and curly apostrophes", () => {
-  let bad = plan(); bad.conversation[1].prompts[0] = "What trips near the water did you enjoy?";
-  assert.throws(() => validatePlan(bad, items, []), /must name it/);
-  const ok = plan(); ok.conversation[1].prompts[0] = "What did you enjoy about Happy Days on a Tuesday night?";
-  assert.equal(validatePlan(generatedPlanSchema.parse(ok), items, []).conversation.length, 3);
-  const curly = plan(); curly.conversation[0].prompts[0] = "What do you enjoy about the dancing in West Side Story’s big scenes?";
-  assert.equal(validatePlan(generatedPlanSchema.parse(curly), items, []).conversation.length, 3);
+test("a question naming the item moves to the front; plans without one are kept, not discarded", () => {
+  const moved = plan(); moved.conversation[1].prompts = ["Where did you watch it?", "What did you enjoy about Happy Days on a Tuesday night?", "Who watched with you?"];
+  assert.equal(validatePlan(generatedPlanSchema.parse(moved), items, []).conversation[1].prompts[0], "What did you enjoy about Happy Days on a Tuesday night?");
+  const unnamed = plan(); unnamed.conversation[1].prompts[0] = "What trips near the water did you enjoy?";
+  assert.equal(validatePlan(generatedPlanSchema.parse(unnamed), items, []).conversation[1].prompts[0], "What trips near the water did you enjoy?");
+  assert.deepEqual(leadWithItem("The Love Boat", ["Who came along?", "What did you like about Love Boat’s cruises?"]), ["What did you like about Love Boat’s cruises?", "Who came along?"]);
 });
 
 test("malformed output and unbounded profiles fail schema validation", () => {

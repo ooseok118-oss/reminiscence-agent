@@ -75,7 +75,7 @@ export default function AgentProgress({ stage, failed, seeds, result, review }: 
                 <span className="sr-only">{done ? " (done)" : stopped ? " (stopped)" : active ? " (in progress)" : " (waiting)"}</span>
               </p>
               {step.detail ? <p className="mt-0.5 text-sm leading-relaxed text-stone-600">{step.detail}</p> : null}
-              {active && !stopped && index === 1 ? <p className="mt-0.5 text-sm text-stone-500">This step usually takes 10 to 20 seconds.</p> : null}
+              {active && !stopped && index > 0 ? <p className="mt-0.5 text-sm text-stone-500">This step usually takes 10 to 30 seconds.</p> : null}
               {stopped ? <p className="mt-0.5 text-sm text-rose-800">Stopped here. See the message below.</p> : null}
             </div>
           </li>

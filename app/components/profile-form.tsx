@@ -151,7 +151,15 @@ export default function ProfileForm({ currentYear }: { currentYear: number }) {
       setReview(screened);
       setStage("plan");
       setProgress(`Set aside ${screened.review.counts.exclude} items that touch on topics to avoid. Writing a 30-minute session…`);
-      const session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
+      let session: PlanResponse;
+      try {
+        session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
+      } catch (firstError) {
+        // The reviewed pool is still valid, so one more planning try costs no extra screening.
+        if (controller.signal.aborted) throw firstError;
+        setProgress("Writing a 30-minute session. Taking one more pass…");
+        session = await post<PlanResponse>("/api/plan", { action: "generate", receipt: screened.receipt });
+      }
       setPlanned(session);
       setStage("done");
       setProgress("Your 30-minute session is ready.");

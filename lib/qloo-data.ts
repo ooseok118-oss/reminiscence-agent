@@ -36,14 +36,18 @@ export function overlapsEra(start: number | null, end: number | null, from: numb
   return start !== null && start <= to && (end === null || end >= from) && (end === null || end >= start);
 }
 
+function list(names: string[]) {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
 export function explanation(contributions: Contribution[]): string | null {
   if (!contributions.length) return null;
-  const [first, ...others] = contributions;
-  if (!others.length) return `Inspired by ${first.name}`;
-  const names = others.map((item) => item.name).join(" and ");
-  return first.score >= 0.58
-    ? `Mostly inspired by ${first.name}, with a touch of ${names}`
-    : `Inspired by ${contributions.length === 2 ? "both " : ""}${first.name} and ${names}`;
+  const [first, second, ...rest] = contributions;
+  if (!second) return `Inspired by ${first.name}`;
+  // One favorite "leads" when it clearly outweighs the next (0.58 vs 0.42 with two favorites).
+  return first.score - second.score >= 0.16
+    ? `Mostly inspired by ${first.name}, with a touch of ${list([second, ...rest].map((item) => item.name))}`
+    : `Inspired by ${rest.length ? "" : "both "}${list(contributions.map((item) => item.name))}`;
 }
 
 export function normalizeItem(raw: unknown, type: FavoriteType, seeds: Seed[], queryWarning: boolean): QlooItem | null {

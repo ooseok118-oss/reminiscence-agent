@@ -24,6 +24,7 @@ RULES
 3. Connect each item to the person's OWN life: who they were with, where they went,
    what they wore, dances, dates, family routines. Ask open questions that start with
    What, How, Who or Where. Never quiz ("Do you remember...?", "What year...?").
+   Never ask them to name songs, films, titles or people ("What songs come to mind?").
    Memory tests cause stress.
 4. The FIRST question for each item names the item and one concrete, pleasant detail taken
    from its description, or a lead star you are certain of, then links it to their life.
@@ -37,7 +38,10 @@ RULES
    empty list.
 7. The sensory activity uses sight, touch or gentle seated movement with everyday things a
    care home has (printed photos, a soft scarf, a hat, clapping or tapping a rhythm).
-   List them in "materials".
+   Tie it to its item: name the item and use something from it (its look, costumes,
+   setting, dances or music). Example: "Look at printed photos of Audrey Hepburn's
+   Breakfast at Tiffany's style while holding a soft silk scarf." List what is needed in
+   "materials", and use every material in the activity.
 8. Keep every question, tip and activity under 20 words, warm and plain, easy to read
    aloud. Use the person's first name at most twice in the whole plan.
 

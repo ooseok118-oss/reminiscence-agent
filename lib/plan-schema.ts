@@ -99,7 +99,16 @@ export function planRequirements(items: ReviewedItem[]): PlanRequirements {
   };
 }
 
-const HARD_TOPICS = ["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
+// The opening question should tie the topic to the Qloo item, so the caregiver sees why it
+// was chosen. A question that names the item moves to the front; if none does, the order
+// stays as written. This is a presentation fix, never a reason to discard a safe plan.
+export function leadWithItem(item: string, prompts: string[]): string[] {
+  const core = (value: string) => value.toLowerCase().replace(/[‘’]/g, "'").replace(/^the\s+/, "").replace(/\s+/g, " ").trim();
+  const index = prompts.findIndex((prompt) => core(prompt).includes(core(item)));
+  return index > 0 ? [prompts[index], ...prompts.slice(0, index), ...prompts.slice(index + 1)] : prompts;
+}
+
+const HARD_TOPICS =["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
 
 export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics: string[]): SessionPlan {
   const requirements = planRequirements(items);
@@ -134,11 +143,6 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
   if (!requirements.sensory_types.includes(kind(plan.sensory_activity.entity_id))) {
     throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
   }
-  // The first question ties the topic to the Qloo item, so the caregiver sees why it was chosen.
-  const core = (value: string) => value.toLowerCase().replace(/[‘’]/g, "'").replace(/^the\s+/, "").replace(/\s+/g, " ").trim();
-  for (const entry of plan.conversation) {
-    if (!core(entry.prompts[0]).includes(core(entry.item))) throw new Error(`The first question about ${entry.item} must name it.`);
-  }
   const conversationIds = plan.conversation.map((entry) => entry.entity_id);
   if (new Set(conversationIds).size !== conversationIds.length) throw new Error("Use a different item for each conversation topic.");
   if (requirements.distinct_music && plan.opening_song.entity_id === plan.closing.entity_id) throw new Error("Use different artists for the opening and closing.");
@@ -152,7 +156,7 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
   };
   return {
     opening_song: { ...describe(plan.opening_song.entity_id), songs: plan.opening_song.songs, caregiver_tip: plan.opening_song.caregiver_tip },
-    conversation: plan.conversation.map((entry) => ({ ...describe(entry.entity_id), prompts: entry.prompts })),
+    conversation: plan.conversation.map((entry) => ({ ...describe(entry.entity_id), prompts: leadWithItem(entry.item, entry.prompts) })),
     sensory_activity: { ...describe(plan.sensory_activity.entity_id), activity: plan.sensory_activity.activity, materials: plan.sensory_activity.materials },
     closing: { ...describe(plan.closing.entity_id), songs: plan.closing.songs, caregiver_tip: plan.closing.caregiver_tip },
   };

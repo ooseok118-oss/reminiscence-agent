@@ -23,7 +23,9 @@ async function structured<T>(stage: string, model: string, system: string, input
   if (!key) throw new PlanningError("Gemini is not configured on the server. Please contact the site owner.", 503);
   const google = createGoogle({ apiKey: key });
   let feedback = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // The plan has more rules to satisfy than the screening, so it gets one extra attempt.
+  const attempts = stage === "plan" ? 3 : 2;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining < 1000) throw new PlanningError("Planning took too long. Please try again.", 504);
     let generated = false;
@@ -46,11 +48,13 @@ async function structured<T>(stage: string, model: string, system: string, input
     } catch (error) {
       const details = error as { name?: string; statusCode?: number };
       const invalidOutput = generated || /NoObjectGenerated|NoOutputGenerated|NoContentGenerated|TypeValidation|JSONParse/.test(details.name ?? "");
-      console.error("Gemini request failed", { stage, attempt: attempt + 1, status: details.statusCode ?? null, reason: invalidOutput ? "invalid_output" : "provider_or_timeout" });
+      // Rule violations are our own messages (no user data), so they are safe to log for diagnosis.
+      const rule = generated && error instanceof Error ? error.message.slice(0, 160) : null;
+      console.error("Gemini request failed", { stage, attempt: attempt + 1, status: details.statusCode ?? null, reason: invalidOutput ? "invalid_output" : "provider_or_timeout", rule });
       if (!invalidOutput) throw new PlanningError(details.statusCode === 429
         ? "Gemini is busy or its quota is exhausted. Please wait and try again."
         : "Gemini could not complete this request. Please try again.", details.statusCode === 429 ? 429 : 502);
-      if (attempt === 1) throw new PlanningError("Gemini returned an invalid result twice. No session was released. Please try again.");
+      if (attempt === attempts - 1) throw new PlanningError("Gemini could not write a plan that passed every safety and format check. No session was released. Please try again.");
       feedback = generated && error instanceof Error ? error.message : "Return complete, valid JSON matching the schema exactly.";
     }
   }
