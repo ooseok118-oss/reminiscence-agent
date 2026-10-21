@@ -30,7 +30,7 @@ export default function PlanningResults({ review, planned }: { review: ReviewRes
       </div> : null}
       {planned ? <div>
         <h2 className="text-2xl font-semibold">Session plan JSON</h2>
-        <p className="mt-2 text-sm text-stone-600">30 minutes: opening 5 · conversation 15 · sensory activity 5 · closing 5. Music identifies a Qloo artist; choose a familiar recording together.</p>
+        <p className="mt-2 text-sm text-stone-600">30 minutes: opening 5 · conversation 15 · sensory activity 5 · closing 5. Artists, films and shows come from Qloo. Suggested recordings are AI suggestions; preview before playing.</p>
         <pre className="mt-4 max-h-[42rem] overflow-auto rounded-xl bg-stone-950 p-4 text-sm leading-relaxed whitespace-pre-wrap break-words text-stone-100" tabIndex={0} aria-label="Session plan JSON">{JSON.stringify(planned.plan, null, 2)}</pre>
       </div> : null}
       <details>

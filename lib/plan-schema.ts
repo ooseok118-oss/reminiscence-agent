@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const type = z.enum(["artist", "movie", "tv_show"]);
+type ItemType = z.infer<typeof type>;
 const uuid = z.string().uuid();
 const text = (max: number) => z.string().trim().min(1).max(max);
 export const profileSchema = z.object({
@@ -25,20 +26,24 @@ export type ReviewedItem = z.infer<typeof itemSchema> & Verdict;
 
 // Output IDs are checked against the exact input pool after generation. Avoid
 // complex UUID regexes in Google's constrained decoding schema.
-const base = z.object({ entity_id: text(100), item: text(240), why_this: z.string().max(800), safe_angle: z.string().max(180) });
+// "why_this" is not generated: the server writes it from Qloo explainability scores.
+const base = z.object({ entity_id: text(100), item: text(240), safe_angle: z.string().max(180) });
 const utterance = text(300);
+const songs = z.array(text(120)).max(2);
 export const generatedPlanSchema = z.object({
-  opening_song: base.extend({ caregiver_tip: utterance }),
-  conversation: z.array(base.extend({ prompts: z.array(utterance).length(3) })).min(1).max(2),
-  sensory_activity: base.extend({ activity: utterance }),
-  closing: base.extend({ caregiver_tip: utterance }),
+  opening_song: base.extend({ songs, caregiver_tip: utterance }),
+  conversation: z.array(base.extend({ prompts: z.array(utterance).length(3) })).min(1).max(3),
+  sensory_activity: base.extend({ activity: utterance, materials: z.array(text(80)).max(4) }),
+  closing: base.extend({ songs, caregiver_tip: utterance }),
 });
 export type GeneratedPlan = z.infer<typeof generatedPlanSchema>;
+
+type PlanEntry = { item: string; type: ItemType; why_this: string };
 export type SessionPlan = {
-  opening_song: { item: string; why_this: string; caregiver_tip: string };
-  conversation: { item: string; why_this: string; prompts: string[] }[];
-  sensory_activity: { item: string; why_this: string; activity: string };
-  closing: { item: string; why_this: string; caregiver_tip: string };
+  opening_song: PlanEntry & { songs: string[]; caregiver_tip: string };
+  conversation: (PlanEntry & { prompts: string[] })[];
+  sensory_activity: PlanEntry & { activity: string; materials: string[] };
+  closing: PlanEntry & { songs: string[]; caregiver_tip: string };
 };
 export type SafetyReport = {
   items: ReviewedItem[];
@@ -61,32 +66,89 @@ export function validateVerdicts(verdicts: Verdict[], items: z.infer<typeof item
   });
 }
 
+export type PlanRequirements = {
+  /** One conversation item per listed type, in any order. */
+  conversation_types: ItemType[];
+  /** Types the sensory activity may use. */
+  sensory_types: ItemType[];
+  /** True when the approved pool is large enough for six different items. */
+  all_distinct: boolean;
+  /** True when the opening and closing can use different artists. */
+  distinct_music: boolean;
+};
+
+// The ideal session uses one film, one TV show and one artist in the conversation,
+// plus different artists for the opening and closing. A sparse pool after safety
+// review relaxes only what it cannot supply; safety rules never relax.
+export function planRequirements(items: ReviewedItem[]): PlanRequirements {
+  const usable = items.filter((item) => item.verdict !== "exclude");
+  const count = (kind: ItemType) => usable.filter((item) => item.type === kind).length;
+  const artists = count("artist"), movies = count("movie"), shows = count("tv_show");
+  const conversation_types: ItemType[] = [];
+  if (movies) conversation_types.push("movie");
+  if (shows) conversation_types.push("tv_show");
+  if (artists >= 3) conversation_types.push("artist");
+  if (!conversation_types.length) conversation_types.push("artist");
+  const sensory_types: ItemType[] = movies + shows ? ["movie", "tv_show"] : ["artist"];
+  const artistsNeeded = 2 + (conversation_types.includes("artist") ? 1 : 0) + (sensory_types.includes("artist") ? 1 : 0);
+  const visualsNeeded = conversation_types.filter((kind) => kind !== "artist").length + (sensory_types.includes("artist") ? 0 : 1);
+  return {
+    conversation_types, sensory_types,
+    all_distinct: artists >= artistsNeeded && movies + shows >= visualsNeeded,
+    distinct_music: artists >= 2,
+  };
+}
+
+const HARD_TOPICS = ["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
+
 export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics: string[]): SessionPlan {
+  const requirements = planRequirements(items);
+  const approved = (entityId: string) => items.find((item) => item.entity_id === entityId && item.verdict !== "exclude");
   const entries = [plan.opening_song, ...plan.conversation, plan.sensory_activity, plan.closing];
   for (const entry of entries) {
-    const item = items.find((item) => item.entity_id === entry.entity_id && item.verdict !== "exclude");
+    const item = approved(entry.entity_id);
     if (!item || entry.item !== item.name) throw new Error("Plan used an item outside the approved Qloo pool.");
     if (item.verdict === "caution" && !item.safe_angles.includes(entry.safe_angle)) throw new Error("Caution item needs an approved safe angle.");
     if (item.verdict === "ok" && entry.safe_angle !== "") throw new Error("Unexpected safe angle.");
     const utterances = "prompts" in entry ? entry.prompts : "activity" in entry ? [entry.activity] : [entry.caregiver_tip];
-    if ("prompts" in entry && entry.prompts.some((text) => !/^(what|how)\b/i.test(text))) throw new Error("Start each conversation question with What or How; keep permission choices in caregiver tips.");
-    if (utterances.some((text) => text.split(/\s+/).length >= 25)) throw new Error("Keep each read-aloud prompt under 25 words.");
-    const allText = [entry.item, ...utterances].join(" ");
+    if ("prompts" in entry && entry.prompts.some((line) => !/^(what|how|who|where)\b/i.test(line))) {
+      throw new Error("Start each conversation question with What, How, Who or Where; keep permission choices in caregiver tips.");
+    }
+    if (utterances.some((line) => line.split(/\s+/).length >= 25)) throw new Error("Keep each read-aloud prompt under 25 words.");
+    const extras = "songs" in entry ? entry.songs : "materials" in entry ? entry.materials : [];
+    const allText = [entry.item, ...utterances, ...extras].join(" ");
     if (/\b(remember|recall)\b|\b(what|which) year\b|\bwho (played|sang|starred)\b/i.test(allText)) throw new Error("Do not quiz or request recall.");
-    const hardTopics = ["war", "genocide", "holocaust", "nazi", "nazism", "murder", "suicide", "terminal illness", "violent crime"];
-    for (const topic of [...hardTopics, ...topics].filter(Boolean)) {
+    for (const topic of [...HARD_TOPICS, ...topics].filter(Boolean)) {
       const escaped = topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       if (new RegExp(`\\b${escaped}\\b`, "i").test(allText)) throw new Error("Plan touched a topic to avoid.");
     }
-    // Keep source attribution deterministic; missing metadata stays missing.
-    entry.why_this = item.why_this ?? "";
   }
-  const opening = items.find((item) => item.entity_id === plan.opening_song.entity_id);
-  if (opening?.type !== "artist") throw new Error("Opening needs a Qloo artist, without an invented song.");
-  const clean = <T extends { entity_id: string; safe_angle: string }>(entry: T) => {
-    const { entity_id, safe_angle, ...rest } = entry;
-    void entity_id; void safe_angle;
-    return rest;
+
+  const kind = (entityId: string) => approved(entityId)!.type;
+  if (kind(plan.opening_song.entity_id) !== "artist") throw new Error("Opening needs a Qloo artist.");
+  if (kind(plan.closing.entity_id) !== "artist") throw new Error("Closing needs a Qloo artist.");
+  const conversationTypes = plan.conversation.map((entry) => kind(entry.entity_id)).sort();
+  if (conversationTypes.join() !== [...requirements.conversation_types].sort().join()) {
+    throw new Error(`Conversation needs exactly one item of each type: ${requirements.conversation_types.join(", ")}.`);
+  }
+  if (!requirements.sensory_types.includes(kind(plan.sensory_activity.entity_id))) {
+    throw new Error(`Sensory activity needs one of: ${requirements.sensory_types.join(", ")}.`);
+  }
+  const conversationIds = plan.conversation.map((entry) => entry.entity_id);
+  if (new Set(conversationIds).size !== conversationIds.length) throw new Error("Use a different item for each conversation topic.");
+  if (requirements.distinct_music && plan.opening_song.entity_id === plan.closing.entity_id) throw new Error("Use different artists for the opening and closing.");
+  const allIds = entries.map((entry) => entry.entity_id);
+  if (requirements.all_distinct && new Set(allIds).size !== allIds.length) throw new Error("Never use the same item twice in one session.");
+
+  // Source attribution is deterministic: it comes from Qloo scores, never from the model.
+  const describe = (entityId: string): PlanEntry => {
+    const item = approved(entityId)!;
+    return { item: item.name, type: item.type, why_this: item.why_this ?? "" };
   };
-  return { opening_song: clean(plan.opening_song), conversation: plan.conversation.map(clean), sensory_activity: clean(plan.sensory_activity), closing: clean(plan.closing) };
+  return {
+    opening_song: { ...describe(plan.opening_song.entity_id), songs: plan.opening_song.songs, caregiver_tip: plan.opening_song.caregiver_tip },
+    conversation: plan.conversation.map((entry) => ({ ...describe(entry.entity_id), prompts: entry.prompts })),
+    sensory_activity: { ...describe(plan.sensory_activity.entity_id), activity: plan.sensory_activity.activity, materials: plan.sensory_activity.materials },
+    closing: { ...describe(plan.closing.entity_id), songs: plan.closing.songs, caregiver_tip: plan.closing.caregiver_tip },
+  };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GEMINI_MODEL, generatePlan, PlanningError, reviewItems } from "@/lib/gemini-server";
+import { GEMINI_MODEL, GEMINI_PLAN_MODEL, generatePlan, PlanningError, reviewItems } from "@/lib/gemini-server";
 import { itemSchema, profileSchema, verdictSchema, type ReviewedItem, type SafetyReport } from "@/lib/plan-schema";
 import { expandCategory, expansionInput, QlooError, readBody } from "@/lib/qloo-server";
 import { record } from "@/lib/qloo-data";
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       const items: ReviewedItem[] = z.array(itemSchema.and(verdictSchema)).min(1).max(72).parse(receipt.items);
       if (items.some((item) => item.verdict === "exclude")) throw new PlanningError("Invalid reviewed pool.", 400);
       const plan = await generatePlan(items, profile);
-      return Response.json({ plan, model: GEMINI_MODEL }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ plan, model: GEMINI_PLAN_MODEL }, { headers: { "Cache-Control": "no-store" } });
     }
     throw new PlanningError("Choose review or generate.", 400);
   } catch (error) {
