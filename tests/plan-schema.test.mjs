@@ -222,3 +222,14 @@ test("provider schema keeps required fields and verdict choices without decoding
   assert.equal("pattern" in result.properties.items.items, false);
   assert.equal(full.properties.items.maxItems, 72);
 });
+
+
+
+test("review retries explicit verdict contradictions without promoting excluded items", () => {
+  const item = make(20, "Taxi", "tv_show");
+  const decision = { entity_id: item.entity_id, verdict: "exclude", safe_angles: [], reason: "This is a 1970s sitcom, not a 1950s sitcom. Verdict ok." };
+  assert.throws(() => validateVerdicts([decision], [item]), /reason must agree/);
+  assert.throws(() => validateVerdicts([{ ...decision, reason: "Verdict: caution." }], [item]), /reason must agree/);
+  assert.equal(validateVerdicts([{ ...decision, reason: "Its central subject is a topic to avoid." }], [item])[0].verdict, "exclude");
+  assert.equal(validateVerdicts([{ ...decision, verdict: "ok", reason: "Verdict is ok." }], [item])[0].verdict, "ok");
+});

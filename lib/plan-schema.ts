@@ -64,6 +64,13 @@ export function validateVerdicts(verdicts: Verdict[], items: z.infer<typeof item
   }
   return items.map((item) => {
     const verdict = verdicts.find((v) => v.entity_id === item.entity_id)!;
+    // Reject explicit self-corrections such as an exclude decision ending in
+    // "Verdict ok." Let the existing review retry request a consistent decision;
+    // never promote an excluded item from prose alone.
+    const stated = [...verdict.reason.matchAll(/\bverdict\s*(?:(?:is|:)\s*)?["']?(exclude|caution|ok)\b/gi)];
+    if (stated.some((match) => match[1].toLowerCase() !== verdict.verdict)) {
+      throw new Error("Review reason must agree with its verdict; return only the final decision.");
+    }
     if (verdict.verdict === "caution" && verdict.safe_angles.length < 2) throw new Error("Caution needs two or three safe angles.");
     if (verdict.verdict !== "caution" && verdict.safe_angles.length) throw new Error("Only caution items may have safe angles.");
     return { ...item, ...verdict };
@@ -303,3 +310,4 @@ export function validatePlan(plan: GeneratedPlan, items: ReviewedItem[], topics:
     closing: strip(closing),
   };
 }
+

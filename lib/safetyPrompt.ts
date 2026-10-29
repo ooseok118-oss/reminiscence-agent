@@ -34,4 +34,6 @@ An artist's later death alone does not make their music unsafe. Limit approved u
 safe_angles must be empty for exclude/ok; caution needs two or three concrete positive angles.
 Safe angles must themselves avoid all caregiver topics and the default hard topics.
 Do not add song titles, lyrics or biographical claims absent from the supplied Qloo fields. Use music, rhythm, dancing, costumes or stars as angles.
+Return only the final classification and its supporting reason, never draft deliberation or self-correction. The reason must agree with the verdict field.
 Explain the classification in one short sentence. This is a contextual screening decision, never a guarantee of safety.`;
+

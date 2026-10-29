@@ -146,7 +146,7 @@ Keys are read only on the server. Never commit `.env.local`, and never prefix a 
 Checks:
 
 ```bash
-npm test            # 25 tests: Qloo matching, age window, explanations, plan rules, replanning
+npm test            # 26 tests: Qloo matching, age window, explanations, plan rules, replanning
 npm run lint
 npm run typecheck
 npm run build
@@ -177,3 +177,4 @@ Qloo Taste AI API · Google Gemini (`gemini-3.5-flash-lite`) · Next.js 16 · Re
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
