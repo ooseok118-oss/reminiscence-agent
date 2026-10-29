@@ -49,31 +49,31 @@ The hackathon asks a fair question: *would this work just as well without Qloo?*
 
 **Setup**
 
-- **LLM only:** `gemini-3.5-flash-lite` with our best prompt. It got the same profile, the same favorites, the same age window, and an explicit instruction to personalize to the favorites instead of listing the era's biggest hits. Each profile was run twice.
-- **With Qloo:** our deployed app (`/api/resolve` → `/api/expand`), first 8 results per category.
-- **Profiles:** 5 people born between 1938 and 1955, plus 3 profiles that share everything (born 1948, Columbus) **except** their favorites: Elvis Presley + *Roman Holiday*; Johnny Cash; Aretha Franklin + *The Twilight Zone*.
-- Both sides were checked the same way: every title was looked up in Qloo search, and both went through the same safety screen.
+- **A1 — LLM only:** `gemini-3.5-flash-lite`, two runs per profile.
+- **A2 — LLM only:** the same baseline prompt, profiles and settings, completed to **16/16 runs** on October 24, 2026. Continuation requests used `gemini-3.6-flash`; earlier requests used the alias `gemini-3.5-flash`, whose successful responses reported `gemini-3.6-flash`. Successful outputs were preserved across quota-related pauses.
+- **B — With Qloo:** the deployed app (`/api/resolve` → `/api/expand`), one run per profile. B was not repeated.
+- **Profiles:** five main profiles (P1–P5), plus three profiles (Q1–Q3) sharing birth year 1948 and hometown Columbus but differing in favorites.
+- Matching used Qloo `/search`. Age-window fit uses only film/TV items with a known release year. Main-profile candidate counts are **240 for each LLM condition and 120 for B**; these are not counts of completed sessions.
 
 **Results**
 
-| What we measured | LLM only | With Qloo |
-| --- | --- | --- |
-| Overlap between the three 1948 profiles' lists (Jaccard; lower = more personal) | **0.27** | **0.04** |
-| Same person asked twice: agreement between the two lists | 0.33–0.60 | identical for the same input |
-| Titles found in Qloo search | 235 of 240 (the misses were mostly real works our matcher missed) | 240 of 240 |
-| Works inside the 10–30 age window | 92% | 100% (enforced by our filters) |
+| What we measured | A1: LLM only | A2: LLM only | B: With Qloo |
+| --- | ---: | ---: | ---: |
+| Film/TV age-window fit (known years only) | 91.8% | 89.5% | 100% |
+| Mean Jaccard between Q1–Q3 lists | 0.268 | 0.265 | 0.044 |
+| Mean same-profile Jaccard across two runs | 0.493 | 0.663 | Not measured |
+
+Jaccard is intersection size divided by union size. Lower Q1–Q3 overlap means more different lists when favorites change; higher same-profile overlap means more repeatable lists. Neither is a direct measure of recommendation quality or caregiver benefit.
 
 **What this shows**
 
-- **Personalization is where Qloo makes the difference.** For three people born the same year in the same city, the LLM's lists overlapped 27%. It kept returning era staples such as *The Brady Bunch* and *The Mary Tyler Moore Show* regardless of taste. With Qloo, the lists overlapped 4%.
-- **Much of the LLM's variation is randomness, not taste.** Asked twice about the same person, it changed roughly half its list.
-- **The LLM is good at facts.** Almost every title it gave was real, and its release years were accurate once remakes were accounted for. We do not claim that Qloo reduces hallucination or improves date accuracy, and the safety-screen results were not comparable between the two setups.
+A2's age-window fit was lower than A1's (89.5% versus 91.8%), while its personalization Jaccard was similar (0.265 versus 0.268). A2 repeated its own lists more consistently (0.663 versus 0.493), so variation cannot simply be dismissed as randomness. B produced more distinct lists across the three taste profiles in this small sample, but its age-window filters and removal of input favorites affect the comparison. These results do not establish that Qloo is indispensable, reduces hallucinations, improves safety, or produces better care outcomes.
 
-**Not measured, but built into the design:** "Why this" comes from a measured contribution score, not a model's guess. And because every item has a fixed Qloo ID, the next session can exclude exactly what was used or caused unease.
+**Limits of the test:** eight profiles is a small sample. B's 100% age-window figure reflects filtering; B repeatability was not measured. Popularity-based title matching can select a remake instead of the intended original, so apparent year mismatches need manual review. Safety judgments can differ for identical descriptions across model calls and should not be treated as a reliable ranking of the approaches.
 
-**Limits of the test:** 8 profiles is a small sample. Our app removes the input favorites from its results by design. The 100% age-window figure is guaranteed by our filters, not a finding. A run with a stronger Gemini model was cut short by the free daily quota, so it is not included. Title matching has some error.
+**Built into the design, not established by this experiment:** Qloo IDs support exact exclusions in later sessions, and contribution scores support the app's “Why this” explanation.
 
-Full method, numbers and raw outputs: [`experiments/llm-vs-qloo/`](experiments/llm-vs-qloo/).
+[Public experiment summary](experiments/llm-vs-qloo/results.md). The original raw JSON and `run.mjs` are not yet in this repository; the summary explicitly records that audit limitation.
 
 ## How the agent works
 
